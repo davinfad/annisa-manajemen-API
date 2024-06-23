@@ -16,71 +16,63 @@ connection.connect((err) => {
   console.log('Database connected!');
 });
 
-// Create Transaksi
+// Create Transaction (Completed or Draft)
 app.post('/transaksi', (req, res) => {
-  const { nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, items } = req.body;
+  const { nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, items, status = 0 } = req.body;
 
+  // Check if id_member exists
   if (id_member) {
-    const sqlMemberCheck = 'SELECT nama_member, nomor_telepon FROM member WHERE id_member = ?';
-    connection.query(sqlMemberCheck, [id_member], (err, memberResults) => {
+    connection.query('SELECT id_member FROM members WHERE id_member = ?', [id_member], (err, results) => {
       if (err) {
         res.status(500).send('Error checking member!');
-        throw err;
+        return;
       }
 
-      let namaPelanggan = nama_pelanggan;
-      let nomorTelepon = nomor_telepon;
-
-      if (memberResults.length > 0) {
-        namaPelanggan = memberResults[0].nama_member;
-        nomorTelepon = memberResults[0].nomor_telepon;
+      if (results.length === 0) {
+        res.status(400).send('Member not found!');
+        return;
       }
 
-      createTransaction(namaPelanggan, nomorTelepon, total_harga, metode_pembayaran, id_member, items, res);
+      createTransaction();
     });
   } else {
-    createTransaction(nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, null, items, res);
+    createTransaction();
   }
-});
 
-function createTransaction(namaPelanggan, nomorTelepon, total_harga, metode_pembayaran, id_member, items, res) {
-  const sqlTransaksi = id_member 
-    ? 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member) VALUES (?, ?, ?, ?, ?)'
-    : 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran) VALUES (?, ?, ?, ?)';
+  function createTransaction() {
+    const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status) VALUES (?, ?, ?, ?, ?, ?, ?)';
+    const params = [nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status];
 
-  const params = id_member 
-    ? [namaPelanggan, nomorTelepon, total_harga, metode_pembayaran, id_member]
-    : [namaPelanggan, nomorTelepon, total_harga, metode_pembayaran];
-
-  connection.query(sqlTransaksi, params, (err, results) => {
-    if (err) {
-      res.status(500).send('Error creating transaction!');
-      throw err;
-    }
-
-    const id_transaksi = results.insertId;
-
-    const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
-    const currentDate = new Date();
-    const values = items.map(item => [
-      id_transaksi,
-      item.id_layanan,
-      item.catatan,
-      item.harga,
-      item.id_karyawan,
-      currentDate
-    ]);
-
-    connection.query(sqlItemTransaksi, [values], (err, results) => {
+    connection.query(sqlTransaksi, params, (err, results) => {
       if (err) {
-        res.status(500).send('Error creating transaction items!');
+        res.status(500).send('Error creating transaction!');
         throw err;
       }
 
-      res.send('Transaction and items created successfully!');
+      const id_transaksi = results.insertId;
+
+      const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
+      const currentDate = new Date();
+      const values = items.map(item => [
+        id_transaksi,
+        item.id_layanan,
+        item.catatan,
+        item.harga,
+        item.id_karyawan,
+        currentDate
+      ]);
+
+      connection.query(sqlItemTransaksi, [values], (err, results) => {
+        if (err) {
+          res.status(500).send('Error creating transaction items!');
+          throw err;
+        }
+
+        res.send('Transaction and items created successfully!');
+      });
     });
-  });
-}
+  }
+});
 
 // Get Transaksi by ID
 app.get('/transaksi/:id', (req, res) => {
@@ -142,6 +134,7 @@ app.get('/transaksi/date/:date', (req, res) => {
     res.send(results);
   });
 });
+
 
 // Create Transaction Draft
 app.post('/transaksi/draft', (req, res) => {
