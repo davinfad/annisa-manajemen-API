@@ -1,6 +1,8 @@
 const express = require('express');
 const mysql = require('mysql');
 const app = express();
+const bcrypt = require('bcrypt');
+const saltRounds = 10;
 
 app.use(express.json());
 
@@ -16,9 +18,76 @@ connection.connect((err) => {
   console.log('Database connected!');
 });
 
-// Create Transaction (Completed or Draft)
+// Register endpoint v
+app.post('/register', (req, res) => {
+  const { username, password, id_cabang } = req.body;
+
+  connection.query('SELECT username FROM users WHERE username = ?', [username], (err, results) => {
+    if (err) {
+      res.status(500).send('Error checking for existing user!');
+      return;
+    }
+
+    if (results.length > 0) {
+      res.status(400).send('Username already exists!');
+      return;
+    }
+
+    bcrypt.hash(password, saltRounds, (err, hash) => {
+      if (err) {
+        res.status(500).send('Error hashing password!');
+        return;
+      }
+
+      const sql = 'INSERT INTO users (username, password, id_cabang) VALUES (?, ?, ?)';
+      connection.query(sql, [username, hash, id_cabang], (err, results) => {
+        if (err) {
+          res.status(500).send('Error creating user!');
+          return;
+        }
+        res.send('User registered successfully!');
+      });
+    });
+  });
+});
+
+// Login endpoint v
+app.post('/login', (req, res) => {
+  const { username, password } = req.body;
+
+  const sql = 'SELECT * FROM users WHERE username = ?';
+  connection.query(sql, [username], (err, results) => {
+    if (err) {
+      res.status(500).send('Error finding user!');
+      return;
+    }
+
+    if (results.length === 0) {
+      res.status(400).send('Invalid username or password!');
+      return;
+    }
+
+    const user = results[0];
+    bcrypt.compare(password, user.password, (err, isMatch) => {
+      if (err) {
+        res.status(500).send('Error comparing passwords!');
+        return;
+      }
+
+      if (!isMatch) {
+        res.status(400).send('Invalid username or password!');
+        return;
+      }
+
+      res.send('Login successful!');
+    });
+  });
+});
+
+// Create Transaction (Completed or Draft) v
 app.post('/transaksi', (req, res) => {
-  const { nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, items, status = 0 } = req.body;
+  const { nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, items} = req.body;
+  const status = 0; // Completed
 
   // Check if id_member exists
   if (id_member) {
@@ -74,7 +143,7 @@ app.post('/transaksi', (req, res) => {
   }
 });
 
-// Get Transaksi by ID
+// Get Transaksi by ID v
 app.get('/transaksi/:id', (req, res) => {
   const id = req.params.id;
   const sqlTransaksi = 'SELECT * FROM transaksi WHERE id_transaksi = ?';
@@ -105,7 +174,7 @@ app.get('/transaksi/:id', (req, res) => {
   });
 });
 
-// Get Transaksi by Cabang
+// Get Transaksi by Cabang v
 app.get('/transaksi/cabang/:id_cabang', (req, res) => {
   const id_cabang = req.params.id_cabang;
   const sql = 'SELECT * FROM transaksi WHERE id_cabang = ?';
