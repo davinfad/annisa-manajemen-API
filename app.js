@@ -1,6 +1,8 @@
 const express = require('express');
-const app = express();
 const mysql = require('mysql');
+const app = express();
+
+app.use(express.json());
 
 const connection = mysql.createConnection({
   host: 'localhost',
@@ -14,180 +16,75 @@ connection.connect((err) => {
   console.log('Database connected!');
 });
 
-app.use(express.json());
-
-//create transaksi
+// Create Transaksi
 app.post('/transaksi', (req, res) => {
-  const { nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, items, draft } = req.body;
+  const { nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, items } = req.body;
 
-  connection.beginTransaction(err => {
-    if (err) throw err;
+  if (id_member) {
+    const sqlMemberCheck = 'SELECT nama_member, nomor_telepon FROM member WHERE id_member = ?';
+    connection.query(sqlMemberCheck, [id_member], (err, memberResults) => {
+      if (err) {
+        res.status(500).send('Error checking member!');
+        throw err;
+      }
 
-    if (id_member) {
-      const sqlCheckMember = 'SELECT id_member, nama_member, nomor_telepon FROM member WHERE id_member = ?';
-      connection.query(sqlCheckMember, [id_member], (err, results) => {
-        if (err) {
-          return connection.rollback(() => {
-            res.status(500).send('Error checking member!');
-            throw err;
-          });
-        }
+      let namaPelanggan = nama_pelanggan;
+      let nomorTelepon = nomor_telepon;
 
-        if (results.length === 0) {
-          insertTransaction(false);
-        } else {
-          insertTransaction(true, results[0].nama_member, results[0].nomor_telepon);
-        }
-      });
-    } else {
-      insertTransaction(false);
-    }
+      if (memberResults.length > 0) {
+        namaPelanggan = memberResults[0].nama_member;
+        nomorTelepon = memberResults[0].nomor_telepon;
+      }
 
-    function insertTransaction(withMember, memberName, memberPhone) {
-      const sqlTransaksi = withMember
-        ? 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, draft) VALUES (?, ?, ?, ?, ?, ?)'
-        : 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, draft) VALUES (?, ?, ?, ?, ?)';
-
-      const params = withMember
-        ? [memberName, memberPhone, total_harga, metode_pembayaran, id_member, draft]
-        : [nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, draft];
-
-      connection.query(sqlTransaksi, params, (err, results) => {
-        if (err) {
-          return connection.rollback(() => {
-            res.status(500).send('Error creating transaction!');
-            throw err;
-          });
-        }
-
-        const id_transaksi = results.insertId;
-        const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
-        const currentDate = new Date();
-        const values = items.map(item => [
-          id_transaksi,
-          item.id_layanan,
-          item.catatan,
-          item.harga,
-          item.id_karyawan,
-          currentDate
-        ]);
-
-        connection.query(sqlItemTransaksi, [values], (err, results) => {
-          if (err) {
-            return connection.rollback(() => {
-              res.status(500).send('Error creating transaction items!');
-              throw err;
-            });
-          }
-
-          connection.commit(err => {
-            if (err) {
-              return connection.rollback(() => {
-                res.status(500).send('Error committing transaction!');
-                throw err;
-              });
-            }
-            res.send('Transaction and items created successfully!');
-          });
-        });
-      });
-    }
-  });
+      createTransaction(namaPelanggan, nomorTelepon, total_harga, metode_pembayaran, id_member, items, res);
+    });
+  } else {
+    createTransaction(nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, null, items, res);
+  }
 });
 
-//put transaksi
-app.put('/transaksi/:id', (req, res) => {
-  const { id } = req.params;
-  const { nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, items, draft } = req.body;
+function createTransaction(namaPelanggan, nomorTelepon, total_harga, metode_pembayaran, id_member, items, res) {
+  const sqlTransaksi = id_member 
+    ? 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member) VALUES (?, ?, ?, ?, ?)'
+    : 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran) VALUES (?, ?, ?, ?)';
 
-  connection.beginTransaction(err => {
-    if (err) throw err;
+  const params = id_member 
+    ? [namaPelanggan, nomorTelepon, total_harga, metode_pembayaran, id_member]
+    : [namaPelanggan, nomorTelepon, total_harga, metode_pembayaran];
 
-    if (id_member) {
-      const sqlCheckMember = 'SELECT id_member, nama_member, nomor_telepon FROM member WHERE id_member = ?';
-      connection.query(sqlCheckMember, [id_member], (err, results) => {
-        if (err) {
-          return connection.rollback(() => {
-            res.status(500).send('Error checking member!');
-            throw err;
-          });
-        }
-
-        if (results.length === 0) {
-          updateTransaction(false);
-        } else {
-          updateTransaction(true, results[0].nama_member, results[0].nomor_telepon);
-        }
-      });
-    } else {
-      updateTransaction(false);
+  connection.query(sqlTransaksi, params, (err, results) => {
+    if (err) {
+      res.status(500).send('Error creating transaction!');
+      throw err;
     }
 
-    function updateTransaction(withMember, memberName, memberPhone) {
-      const sqlTransaksi = withMember
-        ? 'UPDATE transaksi SET nama_pelanggan = ?, nomor_telepon = ?, total_harga = ?, metode_pembayaran = ?, id_member = ?, draft = ? WHERE id_transaksi = ?'
-        : 'UPDATE transaksi SET nama_pelanggan = ?, nomor_telepon = ?, total_harga = ?, metode_pembayaran = ?, draft = ? WHERE id_transaksi = ?';
+    const id_transaksi = results.insertId;
 
-      const params = withMember
-        ? [memberName, memberPhone, total_harga, metode_pembayaran, id_member, draft, id]
-        : [nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, draft, id];
+    const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
+    const currentDate = new Date();
+    const values = items.map(item => [
+      id_transaksi,
+      item.id_layanan,
+      item.catatan,
+      item.harga,
+      item.id_karyawan,
+      currentDate
+    ]);
 
-      connection.query(sqlTransaksi, params, (err, results) => {
-        if (err) {
-          return connection.rollback(() => {
-            res.status(500).send('Error updating transaction!');
-            throw err;
-          });
-        }
+    connection.query(sqlItemTransaksi, [values], (err, results) => {
+      if (err) {
+        res.status(500).send('Error creating transaction items!');
+        throw err;
+      }
 
-        const sqlDeleteItems = 'DELETE FROM item_transaksi WHERE id_transaksi = ?';
-        connection.query(sqlDeleteItems, [id], (err, results) => {
-          if (err) {
-            return connection.rollback(() => {
-              res.status(500).send('Error deleting transaction items!');
-              throw err;
-            });
-          }
-
-          const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
-          const currentDate = new Date();
-          const values = items.map(item => [
-            id,
-            item.id_layanan,
-            item.catatan,
-            item.harga,
-            item.id_karyawan,
-            currentDate
-          ]);
-
-          connection.query(sqlItemTransaksi, [values], (err, results) => {
-            if (err) {
-              return connection.rollback(() => {
-                res.status(500).send('Error creating transaction items!');
-                throw err;
-              });
-            }
-
-            connection.commit(err => {
-              if (err) {
-                return connection.rollback(() => {
-                  res.status(500).send('Error committing transaction!');
-                  throw err;
-                });
-              }
-              res.send('Transaction and items updated successfully!');
-            });
-          });
-        });
-      });
-    }
+      res.send('Transaction and items created successfully!');
+    });
   });
-});
+}
 
-//get detail transaksi
+// Get Transaksi by ID
 app.get('/transaksi/:id', (req, res) => {
   const id = req.params.id;
-
   const sqlTransaksi = 'SELECT * FROM transaksi WHERE id_transaksi = ?';
   const sqlItems = 'SELECT * FROM item_transaksi WHERE id_transaksi = ?';
 
@@ -202,200 +99,401 @@ app.get('/transaksi/:id', (req, res) => {
       return;
     }
 
-    connection.query(sqlItems, [id], (err, itemsResults) => {
+    connection.query(sqlItems, [id], (err, itemResults) => {
       if (err) {
         res.status(500).send('Error retrieving transaction items!');
         throw err;
       }
 
-      const transaction = transaksiResults[0];
-      transaction.items = itemsResults;
-
-      res.send(transaction);
+      res.send({
+        transaksi: transaksiResults[0],
+        items: itemResults
+      });
     });
   });
 });
 
-  
-  // Get all transactions
-  app.get('/transaksi', (req, res) => {
-    connection.query('SELECT * FROM transaksi', (err, results) => {
-      if (err) throw err;
-      res.send(results);
+// Get Transaksi by Cabang
+app.get('/transaksi/cabang/:id_cabang', (req, res) => {
+  const id_cabang = req.params.id_cabang;
+  const sql = 'SELECT * FROM transaksi WHERE id_cabang = ?';
+
+  connection.query(sql, [id_cabang], (err, results) => {
+    if (err) {
+      res.status(500).send('Error retrieving transactions!');
+      throw err;
+    }
+
+    res.send(results);
+  });
+});
+
+// Get Transaksi by Date
+app.get('/transaksi/date/:date', (req, res) => {
+  const date = req.params.date;
+  const sql = 'SELECT * FROM transaksi WHERE DATE(created_at) = ?';
+
+  connection.query(sql, [date], (err, results) => {
+    if (err) {
+      res.status(500).send('Error retrieving transactions!');
+      throw err;
+    }
+
+    res.send(results);
+  });
+});
+
+// Create Transaction Draft
+app.post('/transaksi/draft', (req, res) => {
+  const { nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, items } = req.body;
+  const status = 1; // Draft
+  const sqlTransaksi = id_member
+    ? 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, status) VALUES (?, ?, ?, ?, ?, ?)'
+    : 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, status) VALUES (?, ?, ?, ?, ?)';
+
+  const params = id_member
+    ? [nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, status]
+    : [nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, status];
+
+  connection.query(sqlTransaksi, params, (err, results) => {
+    if (err) {
+      res.status(500).send('Error creating transaction draft!');
+      throw err;
+    }
+
+    const id_transaksi = results.insertId;
+
+    const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
+    const currentDate = new Date();
+    const values = items.map(item => [
+      id_transaksi,
+      item.id_layanan,
+      item.catatan,
+      item.harga,
+      item.id_karyawan,
+      currentDate
+    ]);
+
+    connection.query(sqlItemTransaksi, [values], (err, results) => {
+      if (err) {
+        res.status(500).send('Error creating transaction items!');
+        throw err;
+      }
+
+      res.send('Transaction draft and items created successfully!');
     });
   });
-  
-  // Get transaction by ID with items
-app.get('/transaksi/:id', (req, res) => {
+});
+
+// Continue Draft
+app.put('/transaksi/draft/:id', (req, res) => {
   const id = req.params.id;
-  const sql = `
-      SELECT t.*, it.*
-      FROM transaksi t
-      LEFT JOIN item_transaksi it ON t.id_transaksi = it.id_transaksi
-      WHERE t.id_transaksi = ?
-  `;
+  const { total_harga, metode_pembayaran, items } = req.body;
+  const status = 'completed';
+
+  const sqlUpdateTransaksi = 'UPDATE transaksi SET total_harga = ?, metode_pembayaran = ?, status = ? WHERE id_transaksi = ?';
+  connection.query(sqlUpdateTransaksi, [total_harga, metode_pembayaran, status, id], (err, results) => {
+    if (err) {
+      res.status(500).send('Error updating transaction draft!');
+      throw err;
+    }
+
+    const sqlDeleteItems = 'DELETE FROM item_transaksi WHERE id_transaksi = ?';
+    connection.query(sqlDeleteItems, [id], (err, results) => {
+      if (err) {
+        res.status(500).send('Error deleting old transaction items!');
+        throw err;
+      }
+
+      const sqlInsertItems = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
+      const currentDate = new Date();
+      const values = items.map(item => [
+        id,
+        item.id_layanan,
+        item.catatan,
+        item.harga,
+        item.id_karyawan,
+        currentDate
+      ]);
+
+      connection.query(sqlInsertItems, [values], (err, results) => {
+        if (err) {
+          res.status(500).send('Error creating new transaction items!');
+          throw err;
+        }
+
+        res.send('Transaction draft continued and items updated successfully!');
+      });
+    });
+  });
+});
+
+// CRUD Karyawan
+app.post('/karyawan', (req, res) => {
+  const { nama_karyawan, alamat, nomor_telepon, id_cabang } = req.body;
+  const sql = 'INSERT INTO karyawan (nama_karyawan, alamat, nomor_telepon, id_cabang) VALUES (?, ?, ?, ?)';
+  connection.query(sql, [nama_karyawan, alamat, nomor_telepon, id_cabang], (err, results) => {
+    if (err) {
+      res.status(500).send('Error creating karyawan!');
+      throw err;
+    }
+    res.send('Karyawan created!');
+  });
+});
+
+app.get('/karyawan/:id_cabang', (req, res) => {
+  const id_cabang = req.params.id_cabang;
+  const sql = 'SELECT * FROM karyawan WHERE id_cabang = ?';
+  connection.query(sql, [id_cabang], (err, results) => {
+    if (err) {
+      res.status(500).send('Error retrieving karyawan!');
+      throw err;
+    }
+    res.send(results);
+  });
+});
+
+app.put('/karyawan/:id', (req, res) => {
+  const id = req.params.id;
+  const { nama_karyawan, alamat, nomor_telepon, id_cabang } = req.body;
+  const sql = 'UPDATE karyawan SET nama_karyawan = ?, alamat = ?, nomor_telepon = ?, id_cabang = ? WHERE id_karyawan = ?';
+  connection.query(sql, [nama_karyawan, alamat, nomor_telepon, id_cabang, id], (err, results) => {
+    if (err) {
+      res.status(500).send('Error updating karyawan!');
+      throw err;
+    }
+    res.send('Karyawan updated!');
+  });
+});
+
+app.delete('/karyawan/:id', (req, res) => {
+  const id = req.params.id;
+  const sql = 'DELETE FROM karyawan WHERE id_karyawan = ?';
   connection.query(sql, [id], (err, results) => {
-      if (err) {
-          res.status(500).send('Error retrieving transaction!');
-          throw err;
-      }
-
-      if (results.length > 0) {
-          const transaksi = {
-              id_transaksi: results[0].id_transaksi,
-              nama_pelanggan: results[0].nama_pelanggan,
-              nomor_telepon: results[0].nomor_telepon,
-              total_harga: results[0].total_harga,
-              metode_pembayaran: results[0].metode_pembayaran,
-              id_member: results[0].id_member,
-              items: results.map(row => ({
-                  id_item_transaksi: row.id_item_transaksi,
-                  id_layanan: row.id_layanan,
-                  catatan: row.catatan,
-                  harga: row.harga,
-                  id_karyawan: row.id_karyawan,
-                  created_at: row.created_at,
-                  updated_at: row.updated_at
-              }))
-          };
-          res.send(transaksi);
-      } else {
-          res.status(404).send('Transaction not found!');
-      }
-  });
-});
-  
-  // Create new layanan
-  app.post('/layanan', (req, res) => {
-    const nama_layanan = req.body.nama_layanan;
-    const persen_komisi = req.body.persen_komisi;
-    const persen_komisi_luarjam = req.body.persen_komisi_luarjam;
-    const kategori = req.body.kategori;
-  
-    const sql = 'INSERT INTO layanan (nama_layanan, persen_komisi, persen_komisi_luarjam, kategori) VALUES (?,?,?,?)';
-    connection.query(sql, [nama_layanan, persen_komisi, persen_komisi_luarjam, kategori], (err, results) => {
-      if (err) throw err;
-      res.send('Layanan created!');
-    });
-  });
-  
-  // Get all layanan
-  app.get('/layanan', (req, res) => {
-    connection.query('SELECT * FROM layanan', (err, results) => {
-      if (err) throw err;
-      res.send(results);
-    });
-  });
-  
-  // Get layanan by ID
-  app.get('/layanan/:id', (req, res) => {
-    const id = req.params.id;
-    connection.query('SELECT * FROM layanan WHERE id_layanan =?', [id], (err, results) => {
-      if (err) throw err;
-      res.send(results);
-    });
-  });
-  
-  // Create new cabang
-  app.post('/cabang', (req, res) => {
-    const nama_cabang = req.body.nama_cabang;
-    const alamat = req.body.alamat;
-    const nomor_telepon = req.body.nomor_telepon;
-  
-    const sql = 'INSERT INTO cabang (nama_cabang, alamat, nomor_telepon) VALUES (?,?,?)';
-    connection.query(sql, [nama_cabang, alamat, nomor_telepon], (err, results) => {
-      if (err) throw err;
-      res.send('Cabang created!');
-    });
-  });
-  
-  // Get all cabang
-  app.get('/cabang', (req, res) => {
-    connection.query('SELECT * FROM cabang', (err, results) => {
-      if (err) throw err;
-      res.send(results);
-    });
-  });
-  
-  // Get cabang by ID
-  app.get('/cabang/:id', (req, res) => {
-    const id = req.params.id;
-    connection.query('SELECT * FROM cabang WHERE id_cabang =?', [id], (err, results) => {
-      if (err) throw err;
-      res.send(results);
-    });
-  });
-  
-  // Create new karyawan
-  app.post('/karyawan', (req, res) => {
-    const nama_karyawan = req.body.nama_karyawan;
-    const alamat = req.body.alamat;
-    const nomor_telepon = req.body.nomor_telepon;
-    const id_cabang = req.body.id_cabang;
-  
-    const sql = 'INSERT INTO karyawan (nama_karyawan, alamat, nomor_telepon, id_cabang) VALUES (?,?,?,?)';
-    connection.query(sql, [nama_karyawan, alamat, nomor_telepon, id_cabang], (err, results) => {
-      if (err) throw err;
-      res.send('Karyawan created!');
-    });
-  });
-  
-  // Get all karyawan
-  app.get('/karyawan', (req, res) => {
-    connection.query('SELECT * FROM karyawan', (err, results) => {
-      if (err) throw err;
-      res.send(results);
-    });
-  });
-  
-  // Get karyawan by ID
-  app.get('/karyawan/:id', (req, res) => {
-    const id = req.params.id;
-    connection.query('SELECT * FROM karyawan WHERE id_karyawan =?', [id], (err, results) => {
-      if (err) throw err;
-      res.send(results);
-    });
-  });
-  
-  // Get all members
-app.get('/member', (req, res) => {
-  connection.query('SELECT * FROM member', (err, results) => {
-      if (err) {
-          res.status(500).send('Error retrieving members!');
-          throw err;
-      }
-      res.send(results);
+    if (err) {
+      res.status(500).send('Error deleting karyawan!');
+      throw err;
+    }
+    res.send('Karyawan deleted!');
   });
 });
 
-// Get member by ID
-app.get('/member/:id', (req, res) => {
+// CRUD Layanan
+app.post('/layanan', (req, res) => {
+  const { nama_layanan, harga } = req.body;
+  const sql = 'INSERT INTO layanan (nama_layanan, harga) VALUES (?, ?)';
+  connection.query(sql, [nama_layanan, harga], (err, results) => {
+    if (err) {
+      res.status(500).send('Error creating layanan!');
+      throw err;
+    }
+    res.send('Layanan created!');
+  });
+});
+
+app.get('/layanan', (req, res) => {
+  const sql = 'SELECT * FROM layanan';
+  connection.query(sql, (err, results) => {
+    if (err) {
+      res.status(500).send('Error retrieving layanan!');
+      throw err;
+    }
+    res.send(results);
+  });
+});
+
+app.put('/layanan/:id', (req, res) => {
   const id = req.params.id;
-  connection.query('SELECT * FROM member WHERE id_member = ?', [id], (err, results) => {
-      if (err) {
-          res.status(500).send('Error retrieving member!');
-          throw err;
-      }
-      res.send(results);
+  const { nama_layanan, harga } = req.body;
+  const sql = 'UPDATE layanan SET nama_layanan = ?, harga = ? WHERE id_layanan = ?';
+  connection.query(sql, [nama_layanan, harga, id], (err, results) => {
+    if (err) {
+      res.status(500).send('Error updating layanan!');
+      throw err;
+    }
+    res.send('Layanan updated!');
   });
 });
 
-// Create new member
-app.post('/member', (req, res) => {
+app.delete('/layanan/:id', (req, res) => {
+  const id = req.params.id;
+  const sql = 'DELETE FROM layanan WHERE id_layanan = ?';
+  connection.query(sql, [id], (err, results) => {
+    if (err) {
+      res.status(500).send('Error deleting layanan!');
+      throw err;
+    }
+    res.send('Layanan deleted!');
+  });
+});
+
+// CRUD Pelanggan
+app.post('/pelanggan', (req, res) => {
   const { nama_member, nomor_telepon, alamat, tanggal_lahir, tanggal_daftar, id_cabang } = req.body;
-  const sql = 'INSERT INTO member (nama_member, nomor_telepon, alamat, tanggal_lahir, tanggal_daftar, id_cabang) VALUES (?, ?, ?, ?, ?, ?)';
-  const params = [nama_member, nomor_telepon, alamat, tanggal_lahir, tanggal_daftar, id_cabang];
-  connection.query(sql, params, (err, results) => {
-      if (err) {
-          res.status(500).send('Error creating member!');
-          throw err;
-      }
-      res.send('Member created successfully!');
+  const sql = 'INSERT INTO members (nama_member, nomor_telepon, alamat, tanggal_lahir, tanggal_daftar, id_cabang) VALUES (?, ?, ?, ?, ?, ?)';
+  connection.query(sql, [nama_member, nomor_telepon, alamat, tanggal_lahir, tanggal_daftar, id_cabang], (err, results) => {
+    if (err) {
+      res.status(500).send('Error creating pelanggan!');
+      throw err;
+    }
+    res.send('Pelanggan created!');
   });
 });
-  
 
-  
-  app.listen(3000, () => {
-    console.log('Server started on port 3000');
+app.get('/pelanggan', (req, res) => {
+  const sql = 'SELECT * FROM members';
+  connection.query(sql, (err, results) => {
+    if (err) {
+      res.status(500).send('Error retrieving pelanggan!');
+      throw err;
+    }
+    res.send(results);
   });
+});
+
+app.put('/pelanggan/:id', (req, res) => {
+  const id = req.params.id;
+  const { nama_member, nomor_telepon, alamat, tanggal_lahir, tanggal_daftar, id_cabang } = req.body;
+  const sql = 'UPDATE members SET nama_member = ?, nomor_telepon = ?, alamat = ?, tanggal_lahir = ?, tanggal_daftar = ?, id_cabang = ? WHERE id_member = ?';
+  connection.query(sql, [nama_member, nomor_telepon, alamat, tanggal_lahir, tanggal_daftar, id_cabang, id], (err, results) => {
+    if (err) {
+      res.status(500).send('Error updating pelanggan!');
+      throw err;
+    }
+    res.send('Pelanggan updated!');
+  });
+});
+
+app.delete('/pelanggan/:id', (req, res) => {
+  const id = req.params.id;
+  const sql = 'DELETE FROM members WHERE id_member = ?';
+  connection.query(sql, [id], (err, results) => {
+    if (err) {
+      res.status(500).send('Error deleting pelanggan!');
+      throw err;
+    }
+    res.send('Pelanggan deleted!');
+  });
+});
+
+// Read Komisi Karyawan by Date
+app.get('/komisi/:date', (req, res) => {
+  const date = req.params.date;
+  const sql = 'SELECT karyawan.id_karyawan, karyawan.nama_karyawan, SUM(item_transaksi.harga) AS total_komisi FROM item_transaksi JOIN karyawan ON item_transaksi.id_karyawan = karyawan.id_karyawan WHERE DATE(item_transaksi.created_at) = ? GROUP BY karyawan.id_karyawan';
+
+  connection.query(sql, [date], (err, results) => {
+    if (err) {
+      res.status(500).send('Error retrieving komisi karyawan!');
+      throw err;
+    }
+
+    res.send(results);
+  });
+});
+
+// Count Money by Metode Pembayaran
+app.get('/money/metode/:metode', (req, res) => {
+  const metode = req.params.metode;
+  const sql = 'SELECT SUM(total_harga) AS total_money FROM transaksi WHERE metode_pembayaran = ?';
+
+  connection.query(sql, [metode], (err, results) => {
+    if (err) {
+      res.status(500).send('Error retrieving total money!');
+      throw err;
+    }
+
+    res.send(results[0]);
+  });
+});
+
+// Count Money by Date
+app.get('/money/date/:date', (req, res) => {
+  const date = req.params.date;
+  const sql = 'SELECT SUM(total_harga) AS total_money FROM transaksi WHERE DATE(created_at) = ?';
+
+  connection.query(sql, [date], (err, results) => {
+    if (err) {
+      res.status(500).send('Error retrieving total money!');
+      throw err;
+    }
+
+    res.send(results[0]);
+  });
+});
+
+// Login Pemilik
+app.post('/login/pemilik', (req, res) => {
+  const { username, password } = req.body;
+  const sql = 'SELECT * FROM pemilik WHERE username = ? AND password = ?';
+
+  connection.query(sql, [username, password], (err, results) => {
+    if (err) {
+      res.status(500).send('Error logging in!');
+      throw err;
+    }
+
+    if (results.length === 0) {
+      res.status(401).send('Invalid credentials!');
+      return;
+    }
+
+    res.send('Login successful!');
+  });
+});
+
+// Login Cabang
+app.post('/login/cabang', (req, res) => {
+  const { username, password } = req.body;
+  const sql = 'SELECT * FROM cabang WHERE username = ? AND password = ?';
+
+  connection.query(sql, [username, password], (err, results) => {
+    if (err) {
+      res.status(500).send('Error logging in!');
+      throw err;
+    }
+
+    if (results.length === 0) {
+      res.status(401).send('Invalid credentials!');
+      return;
+    }
+
+    res.send('Login successful!');
+  });
+});
+
+// Search Layanan
+app.get('/search/layanan', (req, res) => {
+  const { keyword } = req.query;
+  const sql = 'SELECT * FROM layanan WHERE nama_layanan LIKE ?';
+  const search = `%${keyword}%`;
+
+  connection.query(sql, [search], (err, results) => {
+    if (err) {
+      res.status(500).send('Error searching layanan!');
+      throw err;
+    }
+
+    res.send(results);
+  });
+});
+
+// Search Pelanggan
+app.get('/search/pelanggan', (req, res) => {
+  const { keyword } = req.query;
+  const sql = 'SELECT * FROM members WHERE nama_member LIKE ?';
+  const search = `%${keyword}%`;
+
+  connection.query(sql, [search], (err, results) => {
+    if (err) {
+      res.status(500).send('Error searching pelanggan!');
+      throw err;
+    }
+
+    res.send(results);
+  });
+});
+
+const PORT = 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
