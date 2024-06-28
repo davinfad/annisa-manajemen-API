@@ -3,6 +3,8 @@ const mysql = require('mysql');
 const app = express();
 const bcrypt = require('bcrypt');
 const saltRounds = 10;
+const jwt = require('jsonwebtoken');
+const secretKey = 'your_secret_key'; // Replace with your own secret key
 
 app.use(express.json());
 
@@ -18,7 +20,7 @@ connection.connect((err) => {
   console.log('Database connected!');
 });
 
-// Register endpoint v
+// Register endpoint
 app.post('/register', (req, res) => {
   const { username, password, id_cabang } = req.body;
 
@@ -51,11 +53,16 @@ app.post('/register', (req, res) => {
   });
 });
 
-// Login endpoint v
+// Login endpoint
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
 
-  const sql = 'SELECT * FROM users WHERE username = ?';
+  const sql = `
+    SELECT users.*, cabang.nama_cabang 
+    FROM users 
+    JOIN cabang ON users.id_cabang = cabang.id_cabang 
+    WHERE users.username = ?`;
+
   connection.query(sql, [username], (err, results) => {
     if (err) {
       res.status(500).send('Error finding user!');
@@ -79,41 +86,74 @@ app.post('/login', (req, res) => {
         return;
       }
 
-      res.send('Login successful!');
+      // Generate JWT token
+      const token = jwt.sign(
+        { id: user.id, username: user.username, id_cabang: user.id_cabang, nama_cabang: user.nama_cabang },
+        secretKey,
+        { expiresIn: '1h' }
+      );
+
+      res.json({ message: 'Login successful!', token, id_cabang: user.id_cabang, nama_cabang: user.nama_cabang });
     });
   });
 });
 
-// Create Transaction (Completed or Draft) v
+// Middleware to authenticate token
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (token == null) return res.sendStatus(401);
+
+  jwt.verify(token, secretKey, (err, user) => {
+    if (err) return res.sendStatus(403);
+    req.user = user;
+    next();
+  });
+}
+
+// Example protected route
+app.get('/protected', authenticateToken, (req, res) => {
+  res.send('This is a protected route');
+});
+
+// Create Transaction (Completed or Draft)
 app.post('/transaksi', (req, res) => {
-  const { nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, items} = req.body;
+  const { nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, items } = req.body;
   const status = 0; // Completed
 
-  // Check if id_member exists
+  // Log the incoming request data for debugging
+  console.log('Incoming transaction request:', req.body);
+
+  // Check if id_member exists and get member details
   if (id_member) {
-    connection.query('SELECT id_member FROM members WHERE id_member = ?', [id_member], (err, results) => {
+    connection.query('SELECT id_member, nama_member, nomor_telepon FROM member WHERE id_member = ?', [id_member], (err, results) => {
       if (err) {
+        console.error('Error checking member:', err);
         res.status(500).send('Error checking member!');
         return;
       }
 
+      console.log('Member check results:', results);
       if (results.length === 0) {
         res.status(400).send('Member not found!');
         return;
       }
 
-      createTransaction();
+      const member = results[0];
+      createTransaction(member.nama_member, member.nomor_telepon);
     });
   } else {
-    createTransaction();
+    createTransaction(nama_pelanggan, nomor_telepon);
   }
 
-  function createTransaction() {
+  function createTransaction(nama, nomor) {
     const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status) VALUES (?, ?, ?, ?, ?, ?, ?)';
-    const params = [nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status];
+    const params = [nama, nomor, total_harga, metode_pembayaran, id_member, id_cabang, status];
 
     connection.query(sqlTransaksi, params, (err, results) => {
       if (err) {
+        console.error('Error creating transaction:', err);
         res.status(500).send('Error creating transaction!');
         throw err;
       }
@@ -133,13 +173,65 @@ app.post('/transaksi', (req, res) => {
 
       connection.query(sqlItemTransaksi, [values], (err, results) => {
         if (err) {
+          console.error('Error creating transaction items:', err);
           res.status(500).send('Error creating transaction items!');
           throw err;
         }
 
-        res.send('Transaction and items created successfully!');
+        // Calculate and update the commission for each karyawan
+        updateKomisi(items, currentDate, res);
       });
     });
+  }
+
+  function updateKomisi(items, transactionDate, res) {
+    let updatePromises = items.map(item => {
+      return new Promise((resolve, reject) => {
+        const getKomisiSql = 'SELECT persen_komisi, persen_komisi_luarjam FROM layanan WHERE id_layanan = ?';
+        connection.query(getKomisiSql, [item.id_layanan], (err, results) => {
+          if (err) {
+            console.error('Error retrieving commission percentage:', err);
+            reject('Error retrieving commission percentage!');
+            return;
+          }
+
+          if (results.length > 0) {
+            const { persen_komisi, persen_komisi_luarjam } = results[0];
+            const hour = transactionDate.getHours();
+            const isOutsideWorkingHours = hour < 9 || hour >= 18;
+            const komisiPercentage = isOutsideWorkingHours ? persen_komisi_luarjam : persen_komisi;
+            const komisi = item.harga * (komisiPercentage / 100);
+
+            const updateKomisiSql = `
+              UPDATE karyawan 
+              SET komisi_harian = komisi_harian + ?, 
+                  komisi = komisi + ? 
+              WHERE id_karyawan = ?`;
+
+            connection.query(updateKomisiSql, [komisi, komisi, item.id_karyawan], (err, results) => {
+              if (err) {
+                console.error('Error updating commissions:', err);
+                reject('Error updating commissions!');
+                return;
+              }
+
+              resolve();
+            });
+          } else {
+            reject('Service not found!');
+          }
+        });
+      });
+    });
+
+    Promise.all(updatePromises)
+      .then(() => {
+        res.send('Transaction and items created successfully, and commissions updated!');
+      })
+      .catch(error => {
+        console.error('Promise error:', error);
+        res.status(500).send(error);
+      });
   }
 });
 
@@ -340,54 +432,118 @@ app.delete('/karyawan/:id', (req, res) => {
   });
 });
 
-// CRUD Layanan
-app.post('/layanan', (req, res) => {
-  const { nama_layanan, harga } = req.body;
-  const sql = 'INSERT INTO layanan (nama_layanan, harga) VALUES (?, ?)';
-  connection.query(sql, [nama_layanan, harga], (err, results) => {
+// Clear Daily Commission
+app.post('/komisi/clear_daily', (req, res) => {
+  const sql = `
+    UPDATE karyawan
+    SET komisi_harian = 0
+  `;
+
+  connection.query(sql, (err, result) => {
     if (err) {
-      res.status(500).send('Error creating layanan!');
-      throw err;
+      console.error('Error clearing daily commissions:', err);
+      res.status(500).send('Error clearing daily commissions!');
+      return;
     }
-    res.send('Layanan created!');
+
+    res.send({ message: 'Daily commissions cleared successfully!' });
   });
 });
 
+// Clear Monthly Commission
+app.post('/komisi/clear_monthly', (req, res) => {
+  const sql = `
+    UPDATE karyawan
+    SET komisi = 0
+  `;
+
+  connection.query(sql, (err, result) => {
+    if (err) {
+      console.error('Error clearing daily commissions:', err);
+      res.status(500).send('Error clearing daily commissions!');
+      return;
+    }
+
+    res.send({ message: 'Daily commissions cleared successfully!' });
+  });
+});
+
+// CRUD Layanan
+// add layanan
+app.post('/layanan', (req, res) => {
+  const { nama_layanan, persen_komisi, persen_komisi_luarjam, kategori } = req.body;
+  const sql = 'INSERT INTO layanan (nama_layanan, persen_komisi, persen_komisi_luarjam, kategori) VALUES (?, ?, ?, ?)';
+  connection.query(sql, [nama_layanan, persen_komisi, persen_komisi_luarjam, kategori], (err, results) => {
+    if (err) {
+      console.error('Error creating layanan:', err);
+      res.status(500).json({ error: 'Error creating layanan!' });
+      return;
+    }
+    res.status(201).json({ message: 'Layanan created!', id_layanan: results.insertId });
+  });
+});
+
+// get all layanan
 app.get('/layanan', (req, res) => {
   const sql = 'SELECT * FROM layanan';
   connection.query(sql, (err, results) => {
     if (err) {
-      res.status(500).send('Error retrieving layanan!');
-      throw err;
+      console.error('Error retrieving layanan:', err);
+      res.status(500).json({ error: 'Error retrieving layanan!' });
+      return;
     }
-    res.send(results);
+    res.status(200).json(results);
   });
 });
 
+// Get Layanan by ID
+app.get('/layanan/:id', (req, res) => {
+  const id_layanan = req.params.id;
+  const sql = 'SELECT * FROM layanan WHERE id_layanan = ?';
+  connection.query(sql, [id_layanan], (err, results) => {
+    if (err) {
+      console.error('Error retrieving layanan by ID:', err);
+      res.status(500).json({ error: 'Error retrieving layanan!' });
+      return;
+    }
+    if (results.length === 0) {
+      res.status(404).json({ error: 'Layanan not found!' });
+      return;
+    }
+    res.status(200).json(results[0]);
+  });
+});
+
+
+// edit layanan
 app.put('/layanan/:id', (req, res) => {
-  const id = req.params.id;
-  const { nama_layanan, harga } = req.body;
-  const sql = 'UPDATE layanan SET nama_layanan = ?, harga = ? WHERE id_layanan = ?';
-  connection.query(sql, [nama_layanan, harga, id], (err, results) => {
+  const id_layanan = req.params.id;
+  const { nama_layanan, persen_komisi, persen_komisi_luarjam, kategori } = req.body;
+  const sql = 'UPDATE layanan SET nama_layanan = ?, persen_komisi = ?, persen_komisi_luarjam = ?, kategori = ? WHERE id_layanan = ?';
+  connection.query(sql, [nama_layanan, persen_komisi, persen_komisi_luarjam, kategori, id_layanan], (err, results) => {
     if (err) {
-      res.status(500).send('Error updating layanan!');
-      throw err;
+      console.error('Error updating layanan:', err);
+      res.status(500).json({ error: 'Error updating layanan!' });
+      return;
     }
-    res.send('Layanan updated!');
+    res.status(200).json({ message: 'Layanan updated!', id_layanan: id_layanan });
   });
 });
 
+// delete layanan
 app.delete('/layanan/:id', (req, res) => {
-  const id = req.params.id;
+  const id_layanan = req.params.id;
   const sql = 'DELETE FROM layanan WHERE id_layanan = ?';
-  connection.query(sql, [id], (err, results) => {
+  connection.query(sql, [id_layanan], (err, results) => {
     if (err) {
-      res.status(500).send('Error deleting layanan!');
-      throw err;
+      console.error('Error deleting layanan:', err);
+      res.status(500).json({ error: 'Error deleting layanan!' });
+      return;
     }
-    res.send('Layanan deleted!');
+    res.status(200).json({ message: 'Layanan deleted!', id_layanan: id_layanan });
   });
 });
+
 
 // CRUD Pelanggan
 app.post('/pelanggan', (req, res) => {
@@ -435,21 +591,6 @@ app.delete('/pelanggan/:id', (req, res) => {
       throw err;
     }
     res.send('Pelanggan deleted!');
-  });
-});
-
-// Read Komisi Karyawan by Date
-app.get('/komisi/:date', (req, res) => {
-  const date = req.params.date;
-  const sql = 'SELECT karyawan.id_karyawan, karyawan.nama_karyawan, SUM(item_transaksi.harga) AS total_komisi FROM item_transaksi JOIN karyawan ON item_transaksi.id_karyawan = karyawan.id_karyawan WHERE DATE(item_transaksi.created_at) = ? GROUP BY karyawan.id_karyawan';
-
-  connection.query(sql, [date], (err, results) => {
-    if (err) {
-      res.status(500).send('Error retrieving komisi karyawan!');
-      throw err;
-    }
-
-    res.send(results);
   });
 });
 
