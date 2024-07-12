@@ -9,7 +9,7 @@ const secretKey = 'your_secret_key'; // Replace with your own secret key
 app.use(express.json());
 
 const connection = mysql.createConnection({
-  host: 'localhost',
+  host: 'localhost',   
   user: 'root',
   password: '',
   database: 'annisa_salon_manajemen'
