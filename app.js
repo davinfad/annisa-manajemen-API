@@ -5,6 +5,7 @@ const bcrypt = require('bcrypt');
 const saltRounds = 10;
 const jwt = require('jsonwebtoken');
 const secretKey = 'your_secret_key'; // Replace with your own secret key
+const cron = require('node-cron');
 
 app.use(express.json());
 
@@ -470,8 +471,25 @@ app.post('/komisi/clear_daily', (req, res) => {
   });
 });
 
-// Clear Monthly Commission
-app.post('/komisi/clear_monthly', (req, res) => {
+// Schedule task to clear daily commissions at midnight
+cron.schedule('0 0 * * *', () => {
+  const sql = `
+    UPDATE karyawan
+    SET komisi_harian = 0
+  `;
+
+  connection.query(sql, (err, result) => {
+    if (err) {
+      console.error('Error clearing daily commissions:', err);
+      return;
+    }
+
+    console.log('Daily commissions cleared successfully!');
+  });
+});
+
+// Schedule task to clear monthly commissions on the first day of every month at midnight
+cron.schedule('0 0 1 * *', () => {
   const sql = `
     UPDATE karyawan
     SET komisi = 0
@@ -479,12 +497,11 @@ app.post('/komisi/clear_monthly', (req, res) => {
 
   connection.query(sql, (err, result) => {
     if (err) {
-      console.error('Error clearing daily commissions:', err);
-      res.status(500).send('Error clearing daily commissions!');
+      console.error('Error clearing monthly commissions:', err);
       return;
     }
 
-    res.send({ message: 'Daily commissions cleared successfully!' });
+    console.log('Monthly commissions cleared successfully!');
   });
 });
 
