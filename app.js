@@ -171,8 +171,9 @@ app.post('/transaksi', (req, res) => {
   }
 
   function createTransaction(nama, nomor) {
-    const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status) VALUES (?, ?, ?, ?, ?, ?, ?)';
-    const params = [nama, nomor, total_harga, metode_pembayaran, id_member, id_cabang, status];
+    const currentDate = moment().tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss'); // Adjust to WIB (UTC+7)
+    const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+    const params = [nama, nomor, total_harga, metode_pembayaran, id_member, id_cabang, status, currentDate];
 
     connection.query(sqlTransaksi, params, (err, results) => {
       if (err) {
@@ -184,7 +185,143 @@ app.post('/transaksi', (req, res) => {
       const id_transaksi = results.insertId;
 
       const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
-      const currentDate = moment().tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss'); // Adjust to WIB (UTC+7)
+      const values = items.map(item => [
+        id_transaksi,
+        item.id_layanan,
+        item.catatan,
+        item.harga,
+        item.id_karyawan,
+        currentDate
+      ]);
+
+      connection.query(sqlItemTransaksi, [values], (err, results) => {
+        if (err) {
+          console.error('Error creating transaction items:', err);
+          res.status(500).send('Error creating transaction items!');
+          throw err;
+        }
+
+        if (status === 0) {
+          // Calculate and update the commission for each karyawan only if the transaction is completed
+          updateKomisi(items, currentDate, res);
+        } else {
+          res.send('Draft transaction created!');
+        }
+      });
+    });
+  }
+
+  function updateKomisi(items, transactionDate, res) {
+    let updatePromises = items.map(item => {
+      return new Promise((resolve, reject) => {
+        const getKomisiSql = 'SELECT persen_komisi, persen_komisi_luarjam FROM layanan WHERE id_layanan = ?';
+        connection.query(getKomisiSql, [item.id_layanan], (err, results) => {
+          if (err) {
+            console.error('Error retrieving commission percentage:', err);
+            reject('Error retrieving commission percentage!');
+            return;
+          }
+
+          if (results.length > 0) {
+            const { persen_komisi, persen_komisi_luarjam } = results[0];
+            const hour = moment(transactionDate).tz('Asia/Jakarta').hour(); // Adjust to WIB (UTC+7)
+            const isOutsideWorkingHours = hour < 9 || hour >= 18;
+            const komisiPercentage = isOutsideWorkingHours ? persen_komisi_luarjam : persen_komisi;
+            const komisi = item.harga * (komisiPercentage / 100);
+
+            const updateKomisiSql = `
+              UPDATE karyawan 
+              SET komisi_harian = komisi_harian + ?, 
+                  komisi = komisi + ? 
+              WHERE id_karyawan = ?`;
+
+            connection.query(updateKomisiSql, [komisi, komisi, item.id_karyawan], (err, results) => {
+              if (err) {
+                console.error('Error updating commissions:', err);
+                reject('Error updating commissions!');
+                return;
+              }
+
+              resolve();
+            });
+          } else {
+            reject('Service not found!');
+          }
+        });
+      });
+    });
+
+    Promise.all(updatePromises)
+      .then(() => {
+        res.send('Transaction and items created successfully, and commissions updated!');
+      })
+      .catch(error => {
+        console.error('Promise error:', error);
+        res.status(500).send(error);
+      });
+  }
+});// Create Transaction (Completed or Draft)
+app.post('/transaksi', (req, res) => {
+  const {
+    nama_pelanggan,
+    nomor_telepon,
+    total_harga,
+    metode_pembayaran,
+    id_member,
+    id_cabang,
+    items,
+    isDraft
+  } = req.body;
+
+  const status = isDraft ? 1 : 0; // Draft if isDraft is true, otherwise Completed
+
+  // Log the incoming request data for debugging
+  console.log('Incoming transaction request:', req.body);
+
+  // Check required fields
+  if (!total_harga || !metode_pembayaran || !id_cabang || !items) {
+    return res.status(400).send('Missing required fields!');
+  }
+
+  // Check if id_member exists and get member details
+  if (id_member) {
+    connection.query('SELECT nama_member, nomor_telepon FROM member WHERE id_member = ?', [id_member], (err, results) => {
+      if (err) {
+        console.error('Error checking member:', err);
+        res.status(500).send('Error checking member!');
+        return;
+      }
+
+      if (results.length === 0) {
+        res.status(400).send('Member not found!');
+        return;
+      }
+
+      const member = results[0];
+      createTransaction(member.nama_member, member.nomor_telepon);
+    });
+  } else {
+    if (!nama_pelanggan || !nomor_telepon) {
+      return res.status(400).send('Missing customer name or phone number!');
+    }
+    createTransaction(nama_pelanggan, nomor_telepon);
+  }
+
+  function createTransaction(nama, nomor) {
+    const currentDate = moment().tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss'); // Adjust to WIB (UTC+7)
+    const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+    const params = [nama, nomor, total_harga, metode_pembayaran, id_member, id_cabang, status, currentDate];
+
+    connection.query(sqlTransaksi, params, (err, results) => {
+      if (err) {
+        console.error('Error creating transaction:', err);
+        res.status(500).send('Error creating transaction!');
+        throw err;
+      }
+
+      const id_transaksi = results.insertId;
+
+      const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
       const values = items.map(item => [
         id_transaksi,
         item.id_layanan,
@@ -261,7 +398,6 @@ app.post('/transaksi', (req, res) => {
       });
   }
 });
-
 // Get Transaksi by ID
 app.get('/transaksi/:id', (req, res) => {
   const id = req.params.id;
