@@ -1,7 +1,7 @@
 const express = require('express');
 const mysql = require('mysql2'); // Update to mysql2
 const app = express();
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const saltRounds = 10;
 const jwt = require('jsonwebtoken');
 const secretKey = 'your_secret_key'; // Replace with your own secret key
