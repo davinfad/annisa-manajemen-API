@@ -718,43 +718,17 @@ app.get('/total_money/month/:month/year/:year/cabang/:id_cabang', (req, res) => 
   });
 });
 
-// Login Pemilik
-app.post('/login/pemilik', (req, res) => {
-  const { username, password } = req.body;
-  const sql = 'SELECT * FROM pemilik WHERE username = ? AND password = ?';
-
-  connection.query(sql, [username, password], (err, results) => {
+// Create a new cabang
+app.post('/cabang', (req, res) => {
+  const { nama_cabang, kode_cabang } = req.body;
+  const sql = 'INSERT INTO cabang (nama_cabang, kode_cabang) VALUES (?, ?)';
+  connection.query(sql, [nama_cabang, kode_cabang], (err, result) => {
     if (err) {
-      res.status(500).send('Error logging in!');
-      throw err;
-    }
-
-    if (results.length === 0) {
-      res.status(401).send('Invalid credentials!');
+      console.error('Error creating cabang:', err);
+      res.status(500).send('Error creating cabang!');
       return;
     }
-
-    res.send('Login successful!');
-  });
-});
-
-// Login Cabang
-app.post('/login/cabang', (req, res) => {
-  const { username, password } = req.body;
-  const sql = 'SELECT * FROM cabang WHERE username = ? AND password = ?';
-
-  connection.query(sql, [username, password], (err, results) => {
-    if (err) {
-      res.status(500).send('Error logging in!');
-      throw err;
-    }
-
-    if (results.length === 0) {
-      res.status(401).send('Invalid credentials!');
-      return;
-    }
-
-    res.send('Login successful!');
+    res.send({ message: 'Cabang created successfully!', id: result.insertId });
   });
 });
 
