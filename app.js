@@ -170,10 +170,13 @@ app.post('/transaksi', (req, res) => {
   }
 
   function createTransaction(nama, nomor) {
-    const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status) VALUES (?, ?, ?, ?, ?, ?, ?)';
-    const params = [nama, nomor, total_harga, metode_pembayaran, id_member, id_cabang, status];
+    const currentDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-    connection.query(sqlTransaksi, params, (err, results) => {
+    // Insert into transaksi table with created_at
+    const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+    const paramsTransaksi = [nama, nomor, total_harga, metode_pembayaran, id_member, id_cabang, status, currentDate];
+
+    connection.query(sqlTransaksi, paramsTransaksi, (err, results) => {
       if (err) {
         console.error('Error creating transaction:', err);
         res.status(500).send('Error creating transaction!');
@@ -182,8 +185,8 @@ app.post('/transaksi', (req, res) => {
 
       const id_transaksi = results.insertId;
 
+      // Insert into item_transaksi table with created_at
       const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
-      const currentDate = new Date();
       const values = items.map(item => [
         id_transaksi,
         item.id_layanan,
