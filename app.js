@@ -1,5 +1,5 @@
 const express = require('express');
-const mysql = require('mysql');
+const mysql = require('mysql2'); // Update to mysql2
 const app = express();
 const bcrypt = require('bcrypt');
 const saltRounds = 10;
@@ -7,19 +7,23 @@ const jwt = require('jsonwebtoken');
 const secretKey = 'your_secret_key'; // Replace with your own secret key
 const cron = require('node-cron');
 
-app.use(express.json());
+require('dotenv').config();
 
 const connection = mysql.createConnection({
-  host: 'localhost',   
-  user: 'root',
-  password: '',
-  database: 'annisa_salon_manajemen'
+  host: process.env.MYSQLHOST,
+  user: process.env.MYSQLUSER,
+  password: process.env.MYSQLPASSWORD,
+  database: process.env.MYSQLDATABASE,
+  port: process.env.MYSQLPORT
 });
 
 connection.connect((err) => {
   if (err) throw err;
   console.log('Database connected!');
 });
+
+app.use(express.json());
+
 
 // Register endpoint
 app.post('/register', (req, res) => {
