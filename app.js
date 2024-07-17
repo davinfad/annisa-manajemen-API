@@ -6,6 +6,7 @@ const saltRounds = 10;
 const jwt = require('jsonwebtoken');
 const secretKey = 'your_secret_key'; // Replace with your own secret key
 const cron = require('node-cron');
+const moment = require('moment-timezone');
 
 require('dotenv').config();
 
@@ -170,13 +171,10 @@ app.post('/transaksi', (req, res) => {
   }
 
   function createTransaction(nama, nomor) {
-    const currentDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status) VALUES (?, ?, ?, ?, ?, ?, ?)';
+    const params = [nama, nomor, total_harga, metode_pembayaran, id_member, id_cabang, status];
 
-    // Insert into transaksi table with created_at
-    const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
-    const paramsTransaksi = [nama, nomor, total_harga, metode_pembayaran, id_member, id_cabang, status, currentDate];
-
-    connection.query(sqlTransaksi, paramsTransaksi, (err, results) => {
+    connection.query(sqlTransaksi, params, (err, results) => {
       if (err) {
         console.error('Error creating transaction:', err);
         res.status(500).send('Error creating transaction!');
@@ -185,8 +183,8 @@ app.post('/transaksi', (req, res) => {
 
       const id_transaksi = results.insertId;
 
-      // Insert into item_transaksi table with created_at
       const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
+      const currentDate = moment().tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss'); // Adjust to WIB (UTC+7)
       const values = items.map(item => [
         id_transaksi,
         item.id_layanan,
@@ -226,7 +224,7 @@ app.post('/transaksi', (req, res) => {
 
           if (results.length > 0) {
             const { persen_komisi, persen_komisi_luarjam } = results[0];
-            const hour = transactionDate.getHours();
+            const hour = moment(transactionDate).tz('Asia/Jakarta').hour(); // Adjust to WIB (UTC+7)
             const isOutsideWorkingHours = hour < 9 || hour >= 18;
             const komisiPercentage = isOutsideWorkingHours ? persen_komisi_luarjam : persen_komisi;
             const komisi = item.harga * (komisiPercentage / 100);
