@@ -212,7 +212,7 @@ app.post('/transaksi', (req, res) => {
   }
 
   function updateKomisi(items, transactionDate, res) {
-    const transactionMoment = moment(transactionDate, 'YYYY-MM-DD HH:mm:ss').tz('Asia/Jakarta');
+    const transactionMoment = moment(transactionDate, 'YYYY-MM-DD HH:mm:ss')
     const hour = transactionMoment.hour();
 
     let updatePromises = items.map(item => {
