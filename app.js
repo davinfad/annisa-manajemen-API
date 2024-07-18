@@ -146,21 +146,45 @@ app.post('/transaksi', (req, res) => {
     return res.status(400).send('Missing required fields!');
   }
 
-  // Function to create the transaction
-  function createTransaction(nama, nomor, memberId = null) {
-    const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())';
-    const params = [nama, nomor, total_harga, metode_pembayaran, memberId, id_cabang, status];
+  // Check if id_member exists and get member details
+  if (id_member) {
+    connection.query('SELECT nama_member, nomor_telepon FROM member WHERE id_member = ?', [id_member], (err, results) => {
+      if (err) {
+        console.error('Error checking member:', err);
+        res.status(500).send('Error checking member!');
+        return;
+      }
+
+      if (results.length === 0) {
+        res.status(400).send('Member not found!');
+        return;
+      }
+
+      const member = results[0];
+      createTransaction(member.nama_member, member.nomor_telepon, id_member);
+    });
+  } else {
+    if (!nama_pelanggan || !nomor_telepon) {
+      return res.status(400).send('Missing customer name or phone number!');
+    }
+    createTransaction(nama_pelanggan, nomor_telepon, null); // Pass null for id_member if not provided
+  }
+
+  function createTransaction(nama, nomor) {
+    const currentDate = moment().tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss'); // Adjust to WIB (UTC+7)
+    const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+    const params = [nama, nomor, total_harga, metode_pembayaran, id_member, id_cabang, status, currentDate];
 
     connection.query(sqlTransaksi, params, (err, results) => {
       if (err) {
         console.error('Error creating transaction:', err);
-        return res.status(500).send('Error creating transaction!');
+        res.status(500).send('Error creating transaction!');
+        throw err;
       }
 
       const id_transaksi = results.insertId;
 
       const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
-      const currentDate = new Date();
       const values = items.map(item => [
         id_transaksi,
         item.id_layanan,
@@ -173,20 +197,20 @@ app.post('/transaksi', (req, res) => {
       connection.query(sqlItemTransaksi, [values], (err, results) => {
         if (err) {
           console.error('Error creating transaction items:', err);
-          return res.status(500).send('Error creating transaction items!');
+          res.status(500).send('Error creating transaction items!');
+          throw err;
         }
 
         if (status === 0) {
           // Calculate and update the commission for each karyawan only if the transaction is completed
           updateKomisi(items, currentDate, res);
         } else {
-          return res.send('Draft transaction created!');
+          res.send('Draft transaction created!');
         }
       });
     });
   }
 
-  // Function to update commissions
   function updateKomisi(items, transactionDate, res) {
     let updatePromises = items.map(item => {
       return new Promise((resolve, reject) => {
@@ -200,7 +224,7 @@ app.post('/transaksi', (req, res) => {
 
           if (results.length > 0) {
             const { persen_komisi, persen_komisi_luarjam } = results[0];
-            const hour = transactionDate.getHours();
+            const hour = moment(transactionDate).tz('Asia/Jakarta').hour(); // Adjust to WIB (UTC+7)
             const isOutsideWorkingHours = hour < 9 || hour >= 18;
             const komisiPercentage = isOutsideWorkingHours ? persen_komisi_luarjam : persen_komisi;
             const komisi = item.harga * (komisiPercentage / 100);
@@ -229,34 +253,12 @@ app.post('/transaksi', (req, res) => {
 
     Promise.all(updatePromises)
       .then(() => {
-        return res.send('Transaction and items created successfully, and commissions updated!');
+        res.send('Transaction and items created successfully, and commissions updated!');
       })
       .catch(error => {
         console.error('Promise error:', error);
-        return res.status(500).send(error);
+        res.status(500).send(error);
       });
-  }
-
-  // Check if id_member exists and get member details
-  if (id_member) {
-    connection.query('SELECT nama_member, nomor_telepon FROM member WHERE id_member = ?', [id_member], (err, results) => {
-      if (err) {
-        console.error('Error checking member:', err);
-        return res.status(500).send('Error checking member!');
-      }
-
-      if (results.length === 0) {
-        return res.status(400).send('Member not found!');
-      }
-
-      const member = results[0];
-      createTransaction(member.nama_member, member.nomor_telepon, id_member);
-    });
-  } else {
-    if (!nama_pelanggan || !nomor_telepon) {
-      return res.status(400).send('Missing customer name or phone number!');
-    }
-    createTransaction(nama_pelanggan, nomor_telepon);
   }
 });
 
