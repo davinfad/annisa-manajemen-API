@@ -221,27 +221,29 @@ app.post('/transaksi', (req, res) => {
             reject('Error retrieving commission percentage!');
             return;
           }
-
+  
           if (results.length > 0) {
             const { persen_komisi, persen_komisi_luarjam } = results[0];
             const hour = moment(transactionDate).tz('Asia/Jakarta').hour(); // Adjust to WIB (UTC+7)
+            
+            // Check if the transaction time is outside working hours (before 9 AM or after 6 PM)
             const isOutsideWorkingHours = hour < 9 || hour >= 18;
             const komisiPercentage = isOutsideWorkingHours ? persen_komisi_luarjam : persen_komisi;
             const komisi = item.harga * (komisiPercentage / 100);
-
+  
             const updateKomisiSql = `
               UPDATE karyawan 
               SET komisi_harian = komisi_harian + ?, 
                   komisi = komisi + ? 
               WHERE id_karyawan = ?`;
-
+  
             connection.query(updateKomisiSql, [komisi, komisi, item.id_karyawan], (err, results) => {
               if (err) {
                 console.error('Error updating commissions:', err);
                 reject('Error updating commissions!');
                 return;
               }
-
+  
               resolve();
             });
           } else {
