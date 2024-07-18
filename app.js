@@ -251,6 +251,8 @@ app.post('/transaksi', (req, res) => {
       });
     });
 
+    console.log(`Transaction time in Jakarta timezone: ${moment(transactionDate).tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss')} (Hour: ${hour})`);
+
     Promise.all(updatePromises)
       .then(() => {
         res.send('Transaction and items created successfully, and commissions updated!');
