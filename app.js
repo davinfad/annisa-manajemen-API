@@ -170,16 +170,16 @@ app.post('/transaksi', (req, res) => {
     createTransaction(nama_pelanggan, nomor_telepon, null); // Pass null for id_member if not provided
   }
 
-  function createTransaction(nama, nomor) {
+  function createTransaction(nama, nomor, memberId) {
     const currentDate = moment().tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss'); // Adjust to WIB (UTC+7)
     const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
-    const params = [nama, nomor, total_harga, metode_pembayaran, id_member, id_cabang, status, currentDate];
+    const params = [nama, nomor, total_harga, metode_pembayaran, memberId, id_cabang, status, currentDate];
 
     connection.query(sqlTransaksi, params, (err, results) => {
       if (err) {
         console.error('Error creating transaction:', err);
         res.status(500).send('Error creating transaction!');
-        throw err;
+        return;
       }
 
       const id_transaksi = results.insertId;
@@ -198,7 +198,7 @@ app.post('/transaksi', (req, res) => {
         if (err) {
           console.error('Error creating transaction items:', err);
           res.status(500).send('Error creating transaction items!');
-          throw err;
+          return;
         }
 
         if (status === 0) {
@@ -261,6 +261,7 @@ app.post('/transaksi', (req, res) => {
       });
   }
 });
+
 
 // Get Transaksi by ID
 app.get('/transaksi/:id', (req, res) => {
