@@ -224,7 +224,7 @@ app.post('/transaksi', (req, res) => {
   
           if (results.length > 0) {
             const { persen_komisi, persen_komisi_luarjam } = results[0];
-            const hour = moment(transactionDate).tz('Asia/Jakarta').hour(); // Adjust to WIB (UTC+7)
+            const hour = transactionDate.hour
             
             // Check if the transaction time is outside working hours (before 9 AM or after 6 PM)
             const isOutsideWorkingHours = hour < 9 || hour >= 18;
@@ -265,7 +265,6 @@ app.post('/transaksi', (req, res) => {
       });
   }
 });
-
 
 // Get Transaksi by ID
 app.get('/transaksi/:id', (req, res) => {
