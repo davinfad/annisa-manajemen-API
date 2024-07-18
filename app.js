@@ -482,8 +482,13 @@ app.post('/komisi/clear_daily', (req, res) => {
   });
 });
 
-// Schedule task to clear daily commissions at midnight
+// Schedule task to clear daily commissions at midnight WIB
 cron.schedule('0 0 * * *', () => {
+  const now = moment().tz('Asia/Jakarta');
+  const hourInUTC = now.hour();
+  const minuteInUTC = now.minute();
+  const cronExpression = `${minuteInUTC} ${hourInUTC} * * *`;
+
   const sql = `
     UPDATE karyawan
     SET komisi_harian = 0
@@ -497,10 +502,18 @@ cron.schedule('0 0 * * *', () => {
 
     console.log('Daily commissions cleared successfully!');
   });
+}, {
+  scheduled: true,
+  timezone: "Asia/Jakarta"
 });
 
-// Schedule task to clear monthly commissions on the first day of every month at midnight
+// Schedule task to clear monthly commissions on the first day of every month at midnight WIB
 cron.schedule('0 0 1 * *', () => {
+  const now = moment().tz('Asia/Jakarta');
+  const hourInUTC = now.hour();
+  const minuteInUTC = now.minute();
+  const cronExpression = `${minuteInUTC} ${hourInUTC} 1 * *`;
+
   const sql = `
     UPDATE karyawan
     SET komisi = 0
@@ -514,6 +527,9 @@ cron.schedule('0 0 1 * *', () => {
 
     console.log('Monthly commissions cleared successfully!');
   });
+}, {
+  scheduled: true,
+  timezone: "Asia/Jakarta"
 });
 
 // CRUD Layanan
