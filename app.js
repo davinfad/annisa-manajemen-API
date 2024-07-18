@@ -212,6 +212,9 @@ app.post('/transaksi', (req, res) => {
   }
 
   function updateKomisi(items, transactionDate, res) {
+    const transactionMoment = moment(transactionDate, 'YYYY-MM-DD HH:mm:ss').tz('Asia/Jakarta');
+    const hour = transactionMoment.hour();
+
     let updatePromises = items.map(item => {
       return new Promise((resolve, reject) => {
         const getKomisiSql = 'SELECT persen_komisi, persen_komisi_luarjam FROM layanan WHERE id_layanan = ?';
@@ -224,7 +227,6 @@ app.post('/transaksi', (req, res) => {
   
           if (results.length > 0) {
             const { persen_komisi, persen_komisi_luarjam } = results[0];
-            const hour = transactionDate.hour
             
             // Check if the transaction time is outside working hours (before 9 AM or after 6 PM)
             const isOutsideWorkingHours = hour < 9 || hour >= 18;
@@ -253,7 +255,7 @@ app.post('/transaksi', (req, res) => {
       });
     });
 
-    console.log(`Transaction time in Jakarta timezone: ${moment(transactionDate).tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss')} (Hour: ${hour})`);
+    console.log(`Transaction time in Jakarta timezone: ${transactionMoment.format('YYYY-MM-DD HH:mm:ss')} (Hour: ${hour})`);
 
     Promise.all(updatePromises)
       .then(() => {
