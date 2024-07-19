@@ -4,7 +4,7 @@ const app = express();
 const bcrypt = require('bcryptjs');
 const saltRounds = 10;
 const jwt = require('jsonwebtoken');
-const secretKey = 'your_secret_key'; // Replace with your own secret key
+const secretKey = process.env.JWT_SECRET; // Replace with your own secret key
 const cron = require('node-cron');
 const moment = require('moment-timezone');
 
