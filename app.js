@@ -4,11 +4,12 @@ const app = express();
 const bcrypt = require('bcryptjs');
 const saltRounds = 10;
 const jwt = require('jsonwebtoken');
-const secretKey = process.env.JWT_SECRET; // Replace with your own secret key
 const cron = require('node-cron');
 const moment = require('moment-timezone');
 
 require('dotenv').config();
+
+const secretKey = process.env.JWT_SECRET;
 
 const connection = mysql.createConnection({
   host: process.env.MYSQLHOST,
