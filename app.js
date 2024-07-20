@@ -60,7 +60,7 @@ app.post('/register', (req, res) => {
   });
 });
 
-// Login endpoint
+
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
 
@@ -72,6 +72,7 @@ app.post('/login', (req, res) => {
 
   connection.query(sql, [username], (err, results) => {
     if (err) {
+      console.error('Error executing SQL query:', err);
       res.status(500).send('Error finding user!');
       return;
     }
@@ -84,6 +85,7 @@ app.post('/login', (req, res) => {
     const user = results[0];
     bcrypt.compare(password, user.password, (err, isMatch) => {
       if (err) {
+        console.error('Error comparing passwords:', err);
         res.status(500).send('Error comparing passwords!');
         return;
       }
@@ -119,7 +121,6 @@ function authenticateToken(req, res, next) {
   });
 }
 
-// Example protected route
 app.get('/protected', authenticateToken, (req, res) => {
   res.send('This is a protected route');
 });
@@ -578,7 +579,6 @@ app.get('/layanan/:id', (req, res) => {
     res.status(200).json(results[0]);
   });
 });
-
 
 // edit layanan
 app.put('/layanan/:id', (req, res) => {
