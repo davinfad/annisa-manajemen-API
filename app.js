@@ -26,7 +26,7 @@ connection.connect((err) => {
 
 if (connection.state === 'disconnected') {
   try {
-    await connection.connect();
+    connection.connect();
     console.log('Reconnected to the database');
   } catch (err) {
     console.error('Error reconnecting to the database:', err);
