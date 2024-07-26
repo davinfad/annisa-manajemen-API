@@ -1,5 +1,5 @@
 const express = require('express');
-const mysql = require('mysql2'); // Update to mysql2
+const mysql = require('mysql2'); 
 const app = express();
 const bcrypt = require('bcryptjs');
 const saltRounds = 10;
@@ -23,6 +23,15 @@ connection.connect((err) => {
   if (err) throw err;
   console.log('Database connected!');
 });
+
+if (connection.state === 'disconnected') {
+  try {
+    await connection.connect();
+    console.log('Reconnected to the database');
+  } catch (err) {
+    console.error('Error reconnecting to the database:', err);
+  }
+}
 
 app.use(express.json());
 
