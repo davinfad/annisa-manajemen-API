@@ -289,7 +289,7 @@ app.get('/transaksi/:id', (req, res) => {
     JOIN layanan l ON it.id_layanan = l.id_layanan
     WHERE it.id_transaksi = ?`;
 
-   pool.query(sqlTransaksi, [id], (err, transaksiResults) => {
+  pool.query(sqlTransaksi, [id], (err, transaksiResults) => {
     if (err) {
       res.status(500).send('Error retrieving transaction!');
       throw err;
@@ -300,7 +300,7 @@ app.get('/transaksi/:id', (req, res) => {
       return;
     }
 
-    connection.query(sqlItems, [id], (err, itemResults) => {
+    pool.query(sqlItems, [id], (err, itemResults) => {
       if (err) {
         res.status(500).send('Error retrieving transaction items!');
         throw err;
