@@ -11,27 +11,16 @@ require('dotenv').config();
 
 const secretKey = process.env.JWT_SECRET;
 
-const connection = mysql.createConnection({
+const pool = mysql.createPool({
   host: process.env.MYSQLHOST,
   user: process.env.MYSQLUSER,
   password: process.env.MYSQLPASSWORD,
   database: process.env.MYSQLDATABASE,
-  port: process.env.MYSQLPORT
+  port: process.env.MYSQLPORT,
+  waitForConnections: true,
+  connectionLimit: 10, // Set the limit according to your application's needs
+  queueLimit: 0
 });
-
-connection.connect((err) => {
-  if (err) throw err;
-  console.log('Database connected!');
-});
-
-if (connection.state === 'disconnected') {
-  try {
-    connection.connect();
-    console.log('Reconnected to the database');
-  } catch (err) {
-    console.error('Error reconnecting to the database:', err);
-  }
-}
 
 app.use(express.json());
 
@@ -79,39 +68,49 @@ app.post('/login', (req, res) => {
     JOIN cabang ON users.id_cabang = cabang.id_cabang 
     WHERE users.username = ?`;
 
-  connection.query(sql, [username], (err, results) => {
+  pool.getConnection((err, connection) => {
     if (err) {
-      console.error('Error executing SQL query:', err);
-      res.status(500).send('Error finding user!');
+      console.error('Error getting connection from pool:', err);
+      res.status(500).send('Database connection error');
       return;
     }
 
-    if (results.length === 0) {
-      res.status(400).send('Invalid username or password!');
-      return;
-    }
+    connection.query(sql, [username], (err, results) => {
+      connection.release(); 
 
-    const user = results[0];
-    bcrypt.compare(password, user.password, (err, isMatch) => {
       if (err) {
-        console.error('Error comparing passwords:', err);
-        res.status(500).send('Error comparing passwords!');
+        console.error('Error executing SQL query:', err);
+        res.status(500).send('Error finding user!');
         return;
       }
 
-      if (!isMatch) {
+      if (results.length === 0) {
         res.status(400).send('Invalid username or password!');
         return;
       }
 
-      // Generate JWT token
-      const token = jwt.sign(
-        { id: user.id, username: user.username, id_cabang: user.id_cabang, nama_cabang: user.nama_cabang },
-        secretKey,
-        { expiresIn: '1h' }
-      );
+      const user = results[0];
+      bcrypt.compare(password, user.password, (err, isMatch) => {
+        if (err) {
+          console.error('Error comparing passwords:', err);
+          res.status(500).send('Error comparing passwords!');
+          return;
+        }
 
-      res.json({ message: 'Login successful!', token, id_cabang: user.id_cabang, nama_cabang: user.nama_cabang });
+        if (!isMatch) {
+          res.status(400).send('Invalid username or password!');
+          return;
+        }
+
+        // Generate JWT token
+        const token = jwt.sign(
+          { id: user.id, username: user.username, id_cabang: user.id_cabang, nama_cabang: user.nama_cabang },
+          secretKey,
+          { expiresIn: '1h' }
+        );
+
+        res.json({ message: 'Login successful!', token, id_cabang: user.id_cabang, nama_cabang: user.nama_cabang });
+      });
     });
   });
 });
