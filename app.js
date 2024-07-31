@@ -133,7 +133,6 @@ app.get('/protected', authenticateToken, (req, res) => {
   res.send('This is a protected route');
 });
 
-// Create Transaction (Completed or Draft)
 app.post('/transaksi', (req, res) => {
   const {
     nama_pelanggan,
@@ -148,7 +147,7 @@ app.post('/transaksi', (req, res) => {
 
   const status = isDraft ? 1 : 0; // Draft if isDraft is true, otherwise Completed
 
-  // Log the incoming request data for debugging
+  // Log the incoming request data for debugging (should log only once per request)
   console.log('Incoming transaction request:', req.body);
 
   // Check required fields
@@ -161,13 +160,11 @@ app.post('/transaksi', (req, res) => {
     pool.query('SELECT nama_member, nomor_telepon FROM member WHERE id_member = ?', [id_member], (err, results) => {
       if (err) {
         console.error('Error checking member:', err);
-        res.status(500).send('Error checking member!');
-        return;
+        return res.status(500).send('Error checking member!');
       }
 
       if (results.length === 0) {
-        res.status(400).send('Member not found!');
-        return;
+        return res.status(400).send('Member not found!');
       }
 
       const member = results[0];
@@ -187,19 +184,19 @@ app.post('/transaksi', (req, res) => {
     pool.query('SELECT jam_buka, jam_tutup FROM cabang WHERE id_cabang = ?', [id_cabang], (err, results) => {
       if (err) {
         console.error('Error retrieving branch working hours:', err);
-        res.status(500).send('Error retrieving branch working hours!');
-        return;
+        return res.status(500).send('Error retrieving branch working hours!');
       }
 
       if (results.length === 0) {
-        res.status(400).send('Branch not found!');
-        return;
+        return res.status(400).send('Branch not found!');
       }
 
       const { jam_buka, jam_tutup } = results[0];
       const openingHour = moment(jam_buka, 'HH:mm:ss').hours();
       const closingHour = moment(jam_tutup, 'HH:mm:ss').hours();
       const transactionHour = moment(currentDate, 'YYYY-MM-DD HH:mm:ss').hours();
+
+      console.log(`Transaction time in Jakarta timezone: ${currentDate} (Hour: ${transactionHour})`);
 
       // Check if the transaction time is outside working hours
       const isOutsideWorkingHours = transactionHour < openingHour || transactionHour >= closingHour;
@@ -211,8 +208,7 @@ app.post('/transaksi', (req, res) => {
       pool.query(sqlTransaksi, params, (err, results) => {
         if (err) {
           console.error('Error creating transaction:', err);
-          res.status(500).send('Error creating transaction!');
-          return;
+          return res.status(500).send('Error creating transaction!');
         }
 
         const id_transaksi = results.insertId;
@@ -230,8 +226,7 @@ app.post('/transaksi', (req, res) => {
         pool.query(sqlItemTransaksi, [values], (err, results) => {
           if (err) {
             console.error('Error creating transaction items:', err);
-            res.status(500).send('Error creating transaction items!');
-            return;
+            return res.status(500).send('Error creating transaction items!');
           }
 
           if (status === 0) {
@@ -252,8 +247,7 @@ app.post('/transaksi', (req, res) => {
         pool.query(getKomisiSql, [item.id_layanan], (err, results) => {
           if (err) {
             console.error('Error retrieving commission percentage:', err);
-            reject('Error retrieving commission percentage!');
-            return;
+            return reject('Error retrieving commission percentage!');
           }
 
           if (results.length > 0) {
@@ -270,8 +264,7 @@ app.post('/transaksi', (req, res) => {
             pool.query(updateKomisiSql, [komisi, komisi, item.id_karyawan], (err, results) => {
               if (err) {
                 console.error('Error updating commissions:', err);
-                reject('Error updating commissions!');
-                return;
+                return reject('Error updating commissions!');
               }
 
               resolve();
@@ -282,8 +275,6 @@ app.post('/transaksi', (req, res) => {
         });
       });
     });
-
-    console.log(`Transaction time in Jakarta timezone: ${moment(transactionDate, 'YYYY-MM-DD HH:mm:ss').format('YYYY-MM-DD HH:mm:ss')} (Hour: ${moment(transactionDate, 'YYYY-MM-DD HH:mm:ss').hour()})`);
 
     Promise.all(updatePromises)
       .then(() => {
