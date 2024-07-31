@@ -255,6 +255,9 @@ app.post('/transaksi', (req, res) => {
             const komisiPercentage = isOutsideWorkingHours ? persen_komisi_luarjam : persen_komisi;
             const komisi = item.harga * (komisiPercentage / 100);
 
+             // Log the calculated commission for each item
+             console.log(`Komisi for item ${item.id_layanan}: ${komisi} (Percentage: ${komisiPercentage}%, IsOutsideWorkingHours: ${isOutsideWorkingHours})`);
+
             const updateKomisiSql = `
               UPDATE karyawan 
               SET komisi_harian = komisi_harian + ?, 
