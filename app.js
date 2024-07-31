@@ -133,6 +133,7 @@ app.get('/protected', authenticateToken, (req, res) => {
   res.send('This is a protected route');
 });
 
+//add Transaksi
 app.post('/transaksi', (req, res) => {
   const {
     nama_pelanggan,
@@ -192,14 +193,14 @@ app.post('/transaksi', (req, res) => {
       }
 
       const { jam_buka, jam_tutup } = results[0];
-      const openingHour = moment(jam_buka, 'HH:mm:ss').hours();
-      const closingHour = moment(jam_tutup, 'HH:mm:ss').hours();
-      const transactionHour = moment(currentDate, 'YYYY-MM-DD HH:mm:ss').hours();
+      const openingTime = moment(jam_buka, 'HH:mm:ss');
+      const closingTime = moment(jam_tutup, 'HH:mm:ss');
+      const transactionTime = moment(currentDate, 'YYYY-MM-DD HH:mm:ss');
 
-      console.log(`Transaction time in Jakarta timezone: ${currentDate} (Hour: ${transactionHour})`);
+      console.log(`Transaction time in Jakarta timezone: ${currentDate} (Hour: ${transactionTime.hours()})`);
 
       // Check if the transaction time is outside working hours
-      const isOutsideWorkingHours = transactionHour < openingHour || transactionHour >= closingHour;
+      const isOutsideWorkingHours = transactionTime.isBefore(openingTime) || transactionTime.isAfter(closingTime);
 
       // Continue with creating the transaction
       const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
@@ -289,7 +290,6 @@ app.post('/transaksi', (req, res) => {
       });
   }
 });
-
 
 // Get Transaksi by ID
 app.get('/transaksi/:id', (req, res) => {
