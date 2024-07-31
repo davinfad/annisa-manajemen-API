@@ -182,49 +182,70 @@ app.post('/transaksi', (req, res) => {
 
   function createTransaction(nama, nomor, memberId) {
     const currentDate = moment().tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss'); // Adjust to WIB (UTC+7)
-    const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
-    const params = [nama, nomor, total_harga, metode_pembayaran, memberId, id_cabang, status, currentDate];
 
-    pool.query(sqlTransaksi, params, (err, results) => {
+    // Retrieve working hours for the branch
+    pool.query('SELECT jam_buka, jam_tutup FROM cabang WHERE id_cabang = ?', [id_cabang], (err, results) => {
       if (err) {
-        console.error('Error creating transaction:', err);
-        res.status(500).send('Error creating transaction!');
+        console.error('Error retrieving branch working hours:', err);
+        res.status(500).send('Error retrieving branch working hours!');
         return;
       }
 
-      const id_transaksi = results.insertId;
+      if (results.length === 0) {
+        res.status(400).send('Branch not found!');
+        return;
+      }
 
-      const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
-      const values = items.map(item => [
-        id_transaksi,
-        item.id_layanan,
-        item.catatan,
-        item.harga,
-        item.id_karyawan,
-        currentDate
-      ]);
+      const { jam_buka, jam_tutup } = results[0];
+      const openingHour = moment(jam_buka, 'HH:mm:ss').hours();
+      const closingHour = moment(jam_tutup, 'HH:mm:ss').hours();
+      const transactionHour = moment(currentDate, 'YYYY-MM-DD HH:mm:ss').hours();
 
-      pool.query(sqlItemTransaksi, [values], (err, results) => {
+      // Check if the transaction time is outside working hours
+      const isOutsideWorkingHours = transactionHour < openingHour || transactionHour >= closingHour;
+
+      // Continue with creating the transaction
+      const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+      const params = [nama, nomor, total_harga, metode_pembayaran, memberId, id_cabang, status, currentDate];
+
+      pool.query(sqlTransaksi, params, (err, results) => {
         if (err) {
-          console.error('Error creating transaction items:', err);
-          res.status(500).send('Error creating transaction items!');
+          console.error('Error creating transaction:', err);
+          res.status(500).send('Error creating transaction!');
           return;
         }
 
-        if (status === 0) {
-          // Calculate and update the commission for each karyawan only if the transaction is completed
-          updateKomisi(items, currentDate, res);
-        } else {
-          res.send('Draft transaction created!');
-        }
+        const id_transaksi = results.insertId;
+
+        const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
+        const values = items.map(item => [
+          id_transaksi,
+          item.id_layanan,
+          item.catatan,
+          item.harga,
+          item.id_karyawan,
+          currentDate
+        ]);
+
+        pool.query(sqlItemTransaksi, [values], (err, results) => {
+          if (err) {
+            console.error('Error creating transaction items:', err);
+            res.status(500).send('Error creating transaction items!');
+            return;
+          }
+
+          if (status === 0) {
+            // Calculate and update the commission for each karyawan only if the transaction is completed
+            updateKomisi(items, currentDate, isOutsideWorkingHours, res);
+          } else {
+            res.send('Draft transaction created!');
+          }
+        });
       });
     });
   }
 
-  function updateKomisi(items, transactionDate, res) {
-    const transactionMoment = moment(transactionDate, 'YYYY-MM-DD HH:mm:ss')
-    const hour = transactionMoment.hour();
-
+  function updateKomisi(items, transactionDate, isOutsideWorkingHours, res) {
     let updatePromises = items.map(item => {
       return new Promise((resolve, reject) => {
         const getKomisiSql = 'SELECT persen_komisi, persen_komisi_luarjam FROM layanan WHERE id_layanan = ?';
@@ -234,28 +255,25 @@ app.post('/transaksi', (req, res) => {
             reject('Error retrieving commission percentage!');
             return;
           }
-  
+
           if (results.length > 0) {
             const { persen_komisi, persen_komisi_luarjam } = results[0];
-            
-            // Check if the transaction time is outside working hours (before 9 AM or after 6 PM)
-            const isOutsideWorkingHours = hour < 9 || hour >= 18;
             const komisiPercentage = isOutsideWorkingHours ? persen_komisi_luarjam : persen_komisi;
             const komisi = item.harga * (komisiPercentage / 100);
-  
+
             const updateKomisiSql = `
               UPDATE karyawan 
               SET komisi_harian = komisi_harian + ?, 
                   komisi = komisi + ? 
               WHERE id_karyawan = ?`;
-  
+
             pool.query(updateKomisiSql, [komisi, komisi, item.id_karyawan], (err, results) => {
               if (err) {
                 console.error('Error updating commissions:', err);
                 reject('Error updating commissions!');
                 return;
               }
-  
+
               resolve();
             });
           } else {
@@ -265,7 +283,7 @@ app.post('/transaksi', (req, res) => {
       });
     });
 
-    console.log(`Transaction time in Jakarta timezone: ${transactionMoment.format('YYYY-MM-DD HH:mm:ss')} (Hour: ${hour})`);
+    console.log(`Transaction time in Jakarta timezone: ${moment(transactionDate, 'YYYY-MM-DD HH:mm:ss').format('YYYY-MM-DD HH:mm:ss')} (Hour: ${moment(transactionDate, 'YYYY-MM-DD HH:mm:ss').hour()})`);
 
     Promise.all(updatePromises)
       .then(() => {
@@ -277,6 +295,7 @@ app.post('/transaksi', (req, res) => {
       });
   }
 });
+
 
 // Get Transaksi by ID
 app.get('/transaksi/:id', (req, res) => {
