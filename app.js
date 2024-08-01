@@ -133,7 +133,7 @@ app.get('/protected', authenticateToken, (req, res) => {
   res.send('This is a protected route');
 });
 
-//add Transaksi
+// Add Transaksi
 app.post('/transaksi', (req, res) => {
   const {
     nama_pelanggan,
@@ -156,139 +156,201 @@ app.post('/transaksi', (req, res) => {
     return res.status(400).send('Missing required fields!');
   }
 
-  // Check if id_member exists and get member details
-  if (id_member) {
-    pool.query('SELECT nama_member, nomor_telepon FROM member WHERE id_member = ?', [id_member], (err, results) => {
-      if (err) {
-        console.error('Error checking member:', err);
-        return res.status(500).send('Error checking member!');
-      }
-
-      if (results.length === 0) {
-        return res.status(400).send('Member not found!');
-      }
-
-      const member = results[0];
-      createTransaction(member.nama_member, member.nomor_telepon, id_member);
-    });
-  } else {
-    if (!nama_pelanggan || !nomor_telepon) {
-      return res.status(400).send('Missing customer name or phone number!');
+  // Get a connection and start a transaction
+  pool.getConnection((err, connection) => {
+    if (err) {
+      console.error('Error getting connection:', err);
+      return res.status(500).send('Error getting connection!');
     }
-    createTransaction(nama_pelanggan, nomor_telepon, null); // Pass null for id_member if not provided
-  }
 
-  function createTransaction(nama, nomor, memberId) {
-    const currentDate = moment().tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss'); // Adjust to WIB (UTC+7)
-
-    // Retrieve working hours for the branch
-    pool.query('SELECT jam_buka, jam_tutup FROM cabang WHERE id_cabang = ?', [id_cabang], (err, results) => {
+    connection.beginTransaction((err) => {
       if (err) {
-        console.error('Error retrieving branch working hours:', err);
-        return res.status(500).send('Error retrieving branch working hours!');
+        console.error('Error starting transaction:', err);
+        connection.release();
+        return res.status(500).send('Error starting transaction!');
       }
 
-      if (results.length === 0) {
-        return res.status(400).send('Branch not found!');
-      }
-
-      const { jam_buka, jam_tutup } = results[0];
-      const openingTime = moment(jam_buka, 'HH:mm:ss');
-      const closingTime = moment(jam_tutup, 'HH:mm:ss');
-      const transactionTime = moment(currentDate, 'YYYY-MM-DD HH:mm:ss');
-
-      console.log(`Transaction time in Jakarta timezone: ${currentDate} (Hour: ${transactionTime.hours()})`);
-
-      // Check if the transaction time is outside working hours
-      const isOutsideWorkingHours = transactionTime.isBefore(openingTime) || transactionTime.isAfter(closingTime);
-
-      // Continue with creating the transaction
-      const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
-      const params = [nama, nomor, total_harga, metode_pembayaran, memberId, id_cabang, status, currentDate];
-
-      pool.query(sqlTransaksi, params, (err, results) => {
-        if (err) {
-          console.error('Error creating transaction:', err);
-          return res.status(500).send('Error creating transaction!');
-        }
-
-        const id_transaksi = results.insertId;
-
-        const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
-        const values = items.map(item => [
-          id_transaksi,
-          item.id_layanan,
-          item.catatan,
-          item.harga,
-          item.id_karyawan,
-          currentDate
-        ]);
-
-        pool.query(sqlItemTransaksi, [values], (err, results) => {
+      // Check if id_member exists and get member details
+      if (id_member) {
+        pool.query('SELECT nama_member, nomor_telepon FROM member WHERE id_member = ?', [id_member], (err, results) => {
           if (err) {
-            console.error('Error creating transaction items:', err);
-            return res.status(500).send('Error creating transaction items!');
+            connection.rollback(() => {
+              connection.release();
+              console.error('Error checking member:', err);
+              return res.status(500).send('Error checking member!');
+            });
           }
 
-          if (status === 0) {
-            // Calculate and update the commission for each karyawan only if the transaction is completed
-            updateKomisi(items, currentDate, isOutsideWorkingHours, res);
-          } else {
-            res.send('Draft transaction created!');
+          if (results.length === 0) {
+            connection.rollback(() => {
+              connection.release();
+              return res.status(400).send('Member not found!');
+            });
           }
+
+          const member = results[0];
+          createTransaction(member.nama_member, member.nomor_telepon, id_member);
         });
-      });
-    });
-  }
+      } else {
+        if (!nama_pelanggan || !nomor_telepon) {
+          connection.rollback(() => {
+            connection.release();
+            return res.status(400).send('Missing customer name or phone number!');
+          });
+        }
+        createTransaction(nama_pelanggan, nomor_telepon, null); // Pass null for id_member if not provided
+      }
 
-  function updateKomisi(items, transactionDate, isOutsideWorkingHours, res) {
-    let updatePromises = items.map(item => {
-      return new Promise((resolve, reject) => {
-        const getKomisiSql = 'SELECT persen_komisi, persen_komisi_luarjam FROM layanan WHERE id_layanan = ?';
-        pool.query(getKomisiSql, [item.id_layanan], (err, results) => {
+      function createTransaction(nama, nomor, memberId) {
+        const currentDate = moment().tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss'); // Adjust to WIB (UTC+7)
+
+        // Retrieve working hours for the branch
+        pool.query('SELECT jam_buka, jam_tutup FROM cabang WHERE id_cabang = ?', [id_cabang], (err, results) => {
           if (err) {
-            console.error('Error retrieving commission percentage:', err);
-            return reject('Error retrieving commission percentage!');
+            connection.rollback(() => {
+              connection.release();
+              console.error('Error retrieving branch working hours:', err);
+              return res.status(500).send('Error retrieving branch working hours!');
+            });
           }
 
-          if (results.length > 0) {
-            const { persen_komisi, persen_komisi_luarjam } = results[0];
-            const komisiPercentage = isOutsideWorkingHours ? persen_komisi_luarjam : persen_komisi;
-            const komisi = item.harga * (komisiPercentage / 100);
+          if (results.length === 0) {
+            connection.rollback(() => {
+              connection.release();
+              return res.status(400).send('Branch not found!');
+            });
+          }
 
-             // Log the calculated commission for each item
-             console.log(`Komisi for item ${item.id_layanan}: ${komisi} (Percentage: ${komisiPercentage}%, IsOutsideWorkingHours: ${isOutsideWorkingHours})`);
+          const { jam_buka, jam_tutup } = results[0];
+          const openingTime = moment(jam_buka, 'HH:mm:ss');
+          const closingTime = moment(jam_tutup, 'HH:mm:ss');
+          const transactionTime = moment(currentDate, 'YYYY-MM-DD HH:mm:ss');
 
-            const updateKomisiSql = `
-              UPDATE karyawan 
-              SET komisi_harian = komisi_harian + ?, 
-                  komisi = komisi + ? 
-              WHERE id_karyawan = ?`;
+          console.log(`Transaction time in Jakarta timezone: ${currentDate} (Hour: ${transactionTime.hours()})`);
 
-            pool.query(updateKomisiSql, [komisi, komisi, item.id_karyawan], (err, results) => {
+          // Check if the transaction time is outside working hours
+          const isOutsideWorkingHours = transactionTime.isBefore(openingTime) || transactionTime.isAfter(closingTime);
+
+          // Continue with creating the transaction
+          const sqlTransaksi = 'INSERT INTO transaksi (nama_pelanggan, nomor_telepon, total_harga, metode_pembayaran, id_member, id_cabang, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+          const params = [nama, nomor, total_harga, metode_pembayaran, memberId, id_cabang, status, currentDate];
+
+          pool.query(sqlTransaksi, params, (err, results) => {
+            if (err) {
+              connection.rollback(() => {
+                connection.release();
+                console.error('Error creating transaction:', err);
+                return res.status(500).send('Error creating transaction!');
+              });
+            }
+
+            const id_transaksi = results.insertId;
+
+            const sqlItemTransaksi = 'INSERT INTO item_transaksi (id_transaksi, id_layanan, catatan, harga, id_karyawan, created_at) VALUES ?';
+            const values = items.map(item => [
+              id_transaksi,
+              item.id_layanan,
+              item.catatan,
+              item.harga,
+              item.id_karyawan,
+              currentDate
+            ]);
+
+            pool.query(sqlItemTransaksi, [values], (err, results) => {
               if (err) {
-                console.error('Error updating commissions:', err);
-                return reject('Error updating commissions!');
+                connection.rollback(() => {
+                  connection.release();
+                  console.error('Error creating transaction items:', err);
+                  return res.status(500).send('Error creating transaction items!');
+                });
               }
 
-              resolve();
-            });
-          } else {
-            reject('Service not found!');
-          }
-        });
-      });
-    });
+              if (status === 0) {
+                // Calculate and update the commission for each karyawan only if the transaction is completed
+                updateKomisi(items, currentDate, isOutsideWorkingHours, res, connection, id_transaksi);
+              } else {
+                connection.commit((err) => {
+                  if (err) {
+                    connection.rollback(() => {
+                      connection.release();
+                      console.error('Error committing transaction:', err);
+                      return res.status(500).send('Error committing transaction!');
+                    });
+                  }
 
-    Promise.all(updatePromises)
-      .then(() => {
-        res.send('Transaction and items created successfully, and commissions updated!');
-      })
-      .catch(error => {
-        console.error('Promise error:', error);
-        res.status(500).send(error);
-      });
-  }
+                  connection.release();
+                  res.send('Draft transaction created!');
+                });
+              }
+            });
+          });
+        });
+      }
+
+      function updateKomisi(items, transactionDate, isOutsideWorkingHours, res, connection, idTransaksi) {
+        let updatePromises = items.map(item => {
+          return new Promise((resolve, reject) => {
+            const getKomisiSql = 'SELECT persen_komisi, persen_komisi_luarjam FROM layanan WHERE id_layanan = ?';
+            pool.query(getKomisiSql, [item.id_layanan], (err, results) => {
+              if (err) {
+                console.error('Error retrieving commission percentage:', err);
+                return reject('Error retrieving commission percentage!');
+              }
+
+              if (results.length > 0) {
+                const { persen_komisi, persen_komisi_luarjam } = results[0];
+                const komisiPercentage = isOutsideWorkingHours ? persen_komisi_luarjam : persen_komisi;
+                const komisi = item.harga * (komisiPercentage / 100);
+
+                // Log the calculated commission for each item
+                console.log(`Komisi for item ${item.id_layanan}: ${komisi} (Percentage: ${komisiPercentage}%, IsOutsideWorkingHours: ${isOutsideWorkingHours})`);
+
+                const updateKomisiSql = `
+                  UPDATE karyawan 
+                  SET komisi_harian = komisi_harian + ?, 
+                      komisi = komisi + ? 
+                  WHERE id_karyawan = ?`;
+
+                pool.query(updateKomisiSql, [komisi, komisi, item.id_karyawan], (err, results) => {
+                  if (err) {
+                    console.error('Error updating commissions:', err);
+                    return reject('Error updating commissions!');
+                  }
+
+                  resolve();
+                });
+              } else {
+                reject('Service not found!');
+              }
+            });
+          });
+        });
+
+        Promise.all(updatePromises)
+          .then(() => {
+            connection.commit((err) => {
+              if (err) {
+                connection.rollback(() => {
+                  connection.release();
+                  console.error('Error committing transaction:', err);
+                  return res.status(500).send('Error committing transaction!');
+                });
+              }
+
+              connection.release();
+              res.send('Transaction and items created successfully, and commissions updated!');
+            });
+          })
+          .catch(error => {
+            console.error('Promise error:', error);
+            connection.rollback(() => {
+              connection.release();
+              res.status(500).send(error);
+            });
+          });
+      }
+    });
+  });
 });
 
 // Get Transaksi by ID
@@ -393,51 +455,127 @@ app.delete('/transaksi/:id_transaksi', (req, res) => {
         throw err;
       }
 
-      // SQL to delete items associated with the transaction
-      const deleteItemsSql = 'DELETE FROM item_transaksi WHERE id_transaksi = ?';
-      connection.query(deleteItemsSql, [idTransaksi], (err, result) => {
+      // SQL to get the status and items associated with the transaction
+      const getTransaksiAndItemsSql = `
+        SELECT t.status, it.id_layanan, it.harga, it.id_karyawan
+        FROM transaksi t
+        JOIN item_transaksi it ON t.id_transaksi = it.id_transaksi
+        WHERE t.id_transaksi = ?`;
+
+      connection.query(getTransaksiAndItemsSql, [idTransaksi], (err, results) => {
         if (err) {
           return connection.rollback(() => {
-            res.status(500).send('Error deleting transaction items!');
+            res.status(500).send('Error retrieving transaction details!');
             connection.release();
             throw err;
           });
         }
 
-        // SQL to delete the transaction
-        const deleteTransaksiSql = 'DELETE FROM transaksi WHERE id_transaksi = ?';
-        connection.query(deleteTransaksiSql, [idTransaksi], (err, result) => {
-          if (err) {
-            return connection.rollback(() => {
-              res.status(500).send('Error deleting transaction!');
-              connection.release();
-              throw err;
-            });
-          }
+        if (results.length === 0) {
+          connection.release();
+          return res.status(404).send('Transaction not found!');
+        }
 
-          // Commit the transaction
-          connection.commit((err) => {
-            if (err) {
-              return connection.rollback(() => {
-                res.status(500).send('Error committing transaction!');
-                connection.release();
-                throw err;
+        const status = results[0].status;
+        const items = results;
+
+        if (status === 0) {
+          // Calculate the total commission to subtract for each karyawan
+          let updatePromises = items.map(item => {
+            return new Promise((resolve, reject) => {
+              const getKomisiSql = 'SELECT persen_komisi, persen_komisi_luarjam FROM layanan WHERE id_layanan = ?';
+              connection.query(getKomisiSql, [item.id_layanan], (err, komisiResults) => {
+                if (err) {
+                  return reject('Error retrieving commission percentage!');
+                }
+
+                if (komisiResults.length > 0) {
+                  const { persen_komisi, persen_komisi_luarjam } = komisiResults[0];
+                  const komisiPercentage = persen_komisi; // Assuming the deletion considers only regular hours
+                  const komisi = item.harga * (komisiPercentage / 100);
+
+                  const updateKomisiSql = `
+                    UPDATE karyawan 
+                    SET komisi_harian = komisi_harian - ?, 
+                        komisi = komisi - ? 
+                    WHERE id_karyawan = ?`;
+
+                  connection.query(updateKomisiSql, [komisi, komisi, item.id_karyawan], (err, updateResults) => {
+                    if (err) {
+                      return reject('Error updating commissions!');
+                    }
+                    resolve();
+                  });
+                } else {
+                  resolve(); // Skip if no commission data is found
+                }
               });
-            }
-
-            connection.release();
-
-            if (result.affectedRows === 0) {
-              res.status(404).send('Transaction not found!');
-            } else {
-              res.send('Transaction and its items deleted successfully!');
-            }
+            });
           });
-        });
+
+          Promise.all(updatePromises)
+            .then(() => {
+              deleteTransactionItemsAndTransaction(connection, idTransaksi, res);
+            })
+            .catch(error => {
+              console.error('Promise error:', error);
+              connection.rollback(() => {
+                res.status(500).send('Error subtracting commissions!');
+                connection.release();
+              });
+            });
+        } else {
+          deleteTransactionItemsAndTransaction(connection, idTransaksi, res);
+        }
       });
     });
   });
 });
+
+function deleteTransactionItemsAndTransaction(connection, idTransaksi, res) {
+  // SQL to delete items associated with the transaction
+  const deleteItemsSql = 'DELETE FROM item_transaksi WHERE id_transaksi = ?';
+  connection.query(deleteItemsSql, [idTransaksi], (err, result) => {
+    if (err) {
+      return connection.rollback(() => {
+        res.status(500).send('Error deleting transaction items!');
+        connection.release();
+        throw err;
+      });
+    }
+
+    // SQL to delete the transaction
+    const deleteTransaksiSql = 'DELETE FROM transaksi WHERE id_transaksi = ?';
+    connection.query(deleteTransaksiSql, [idTransaksi], (err, result) => {
+      if (err) {
+        return connection.rollback(() => {
+          res.status(500).send('Error deleting transaction!');
+          connection.release();
+          throw err;
+        });
+      }
+
+      // Commit the transaction
+      connection.commit((err) => {
+        if (err) {
+          return connection.rollback(() => {
+            res.status(500).send('Error committing transaction!');
+            connection.release();
+            throw err;
+          });
+        }
+
+        connection.release();
+
+        if (result.affectedRows === 0) {
+          res.status(404).send('Transaction not found!');
+        } else {
+          res.send('Transaction and its items deleted successfully!');
+        }
+      });
+    });
+  });
+}
 
 // CRUD Karyawan
 app.post('/karyawan', (req, res) => {
