@@ -491,15 +491,15 @@ app.delete('/transaksi/:id_transaksi', (req, res) => {
 
                 if (komisiResults.length > 0) {
                   const { persen_komisi, persen_komisi_luarjam } = komisiResults[0];
-                  const komisiPercentage = persen_komisi; // Assuming the deletion considers only regular hours
+                  const komisiPercentage = isOutsideWorkingHours ? persen_komisi_luarjam : persen_komisi; // Use appropriate percentage based on working hours
                   const komisi = item.harga * (komisiPercentage / 100);
-
+                
                   const updateKomisiSql = `
                     UPDATE karyawan 
                     SET komisi_harian = komisi_harian - ?, 
                         komisi = komisi - ? 
                     WHERE id_karyawan = ?`;
-
+                
                   connection.query(updateKomisiSql, [komisi, komisi, item.id_karyawan], (err, updateResults) => {
                     if (err) {
                       return reject('Error updating commissions!');
