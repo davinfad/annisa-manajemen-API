@@ -645,7 +645,7 @@ app.get('/karyawan/id/:id', (req, res) => {
 
 app.get('/karyawan/:id_cabang', (req, res) => {
   const id_cabang = req.params.id_cabang;
-  const sql = 'SELECT * FROM karyawan WHERE id_cabang = ?';
+  const sql = 'SELECT * FROM karyawan WHERE id_cabang = ? ORDER BY nama_karyawan ASC';
   pool.query(sql, [id_cabang], (err, results) => {
     if (err) {
       res.status(500).send('Error retrieving karyawan!');
@@ -747,7 +747,7 @@ app.post('/layanan', (req, res) => {
 
 // Get all Layanan
 app.get('/layanan', (req, res) => {
-  const sql = 'SELECT * FROM layanan';
+  const sql = 'SELECT * FROM layanan ORDER BY nama_layanan ASC';
   pool.query(sql, (err, results) => {
     if (err) {
       console.error('Error retrieving layanan:', err);
@@ -820,7 +820,7 @@ app.post('/member', (req, res) => {
 
 // Get all members
 app.get('/members', (req, res) => {
-  const sql = 'SELECT * FROM member';
+  const sql = 'SELECT * FROM member ORDER BY nama_member ASC';
   pool.query(sql, (err, results) => {
       if (err) {
           res.status(500).send('Error fetching members!');
@@ -873,7 +873,7 @@ app.delete('/member/:id', (req, res) => {
 // Get members by id_cabang
 app.get('/member/cabang/:id_cabang', (req, res) => {
   const id_cabang = req.params.id_cabang;
-  const sql = 'SELECT * FROM member WHERE id_cabang = ?';
+  const sql = 'SELECT * FROM member WHERE id_cabang = ? ORDER BY nama_member ASC';
   pool.query(sql, [id_cabang], (err, results) => {
     if (err) {
       res.status(500).send('Error fetching members by cabang!');
