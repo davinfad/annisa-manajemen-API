@@ -437,7 +437,8 @@ app.get('/transaksi/draft/cabang/:id_cabang', (req, res) => {
   });
 });
 
-// Delete transaksi by id
+const moment = require('moment');
+
 app.delete('/transaksi/:id_transaksi', (req, res) => {
   const idTransaksi = req.params.id_transaksi;
 
@@ -479,6 +480,10 @@ app.delete('/transaksi/:id_transaksi', (req, res) => {
           // If the transaction is not completed, no need to adjust commissions
           return deleteTransactionItems();
         }
+
+        const today = moment().startOf('day');
+        const transactionDate = moment(created_at).startOf('day');
+        const isToday = today.isSame(transactionDate);
 
         // Retrieve branch working hours
         const getWorkingHoursSql = 'SELECT jam_buka, jam_tutup FROM cabang WHERE id_cabang = ?';
@@ -537,13 +542,18 @@ app.delete('/transaksi/:id_transaksi', (req, res) => {
                     const komisiPercentage = isOutsideWorkingHours ? persen_komisi_luarjam : persen_komisi;
                     const komisi = item.harga * (komisiPercentage / 100);
 
-                    const updateKomisiSql = `
-                      UPDATE karyawan 
-                      SET komisi_harian = komisi_harian - ?, 
-                          komisi = komisi - ? 
-                      WHERE id_karyawan = ?`;
+                    const updateKomisiSql = isToday ?
+                      `UPDATE karyawan 
+                       SET komisi_harian = komisi_harian - ?, 
+                           komisi = komisi - ? 
+                       WHERE id_karyawan = ?` :
+                      `UPDATE karyawan 
+                       SET komisi = komisi - ? 
+                       WHERE id_karyawan = ?`;
 
-                    connection.query(updateKomisiSql, [komisi, komisi, item.id_karyawan], (err, updateResults) => {
+                    const updateParams = isToday ? [komisi, komisi, item.id_karyawan] : [komisi, item.id_karyawan];
+
+                    connection.query(updateKomisiSql, updateParams, (err, updateResults) => {
                       if (err) {
                         return reject('Error updating commissions!');
                       }
@@ -616,7 +626,6 @@ app.delete('/transaksi/:id_transaksi', (req, res) => {
     });
   });
 });
-
 
 // CRUD Karyawan
 app.post('/karyawan', (req, res) => {
