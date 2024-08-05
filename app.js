@@ -437,8 +437,7 @@ app.get('/transaksi/draft/cabang/:id_cabang', (req, res) => {
   });
 });
 
-const moment = require('moment');
-
+//delete transaksi
 app.delete('/transaksi/:id_transaksi', (req, res) => {
   const idTransaksi = req.params.id_transaksi;
 
