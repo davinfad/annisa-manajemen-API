@@ -476,7 +476,7 @@ app.delete('/transaksi/:id_transaksi', (req, res) => {
         const { id_cabang, status, created_at } = transaksiResults[0];
 
         if (status !== 0) {
-          // If the transaction is not completed, no need to adjust commissions
+          // If the transaction is not completed, proceed to delete transaction items and the transaction itself
           return deleteTransactionItems();
         }
 
@@ -521,10 +521,8 @@ app.delete('/transaksi/:id_transaksi', (req, res) => {
             }
 
             if (items.length === 0) {
-              return connection.rollback(() => {
-                res.status(404).send('No items found for the transaction!');
-                connection.release();
-              });
+              // If no items are found, proceed to delete the transaction
+              return deleteTransactionItems();
             }
 
             // Update karyawan's commission based on deleted items
